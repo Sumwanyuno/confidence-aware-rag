@@ -83,6 +83,18 @@ ollama pull llama3.1:8b
 python scripts/smoke_test.py --with-llm
 ```
 
+Run the benchmark (both arms over the labelled SQuAD 2.0 sample; resumable —
+completed `(item_id, arm)` pairs are skipped on restart):
+
+```bash
+python scripts/run_benchmark.py                 # 150 items × guarded + baseline
+python scripts/eval_benchmark.py                # EM/F1, hallucination rate, per arm
+python scripts/calibrate.py                     # fit thresholds -> reports/calibration.json
+python scripts/risk_coverage.py                  # AURC + figures in reports/figures/
+python scripts/run_benchmark.py --tag squad2-judge --limit 50 --scorer both --arm guarded
+python scripts/judge_agreement.py               # NLI vs LLM judge, correlation + kappa
+```
+
 Launch the app:
 
 ```bash
@@ -104,14 +116,22 @@ streamlit run app.py
 | `src/confidence.py` | Harmonic mean, gate thresholds, decision table, RAGTruth labels |
 | `src/pipeline.py` | The orchestration the architecture diagram describes |
 | `src/store.py` | SQLite telemetry backing the monitoring dashboard |
+| `src/squad_metrics.py` | Official SQuAD 2.0 EM/F1 normalisation + no-answer convention |
+| `src/evalstats.py` | Risk–coverage curves, AURC, judge-agreement statistics |
 | `app.py` | Streamlit Q&A interface showing both gate scores and per-claim analysis |
-| `pages/1_Monitoring_Dashboard.py` | Confidence trends, verdict mix, latency budget |
+| `pages/1_Monitoring_Dashboard.py` | Confidence trends, verdict mix, latency budget, arm comparison |
 | `scripts/build_index.py` | Ingest `data/raw/` into ChromaDB |
+| `scripts/build_benchmark.py` | Sample the labelled SQuAD 2.0 dev set (gold + distractors) |
+| `scripts/run_benchmark.py` | Resumable harness: both arms over the benchmark, telemetry-tagged |
+| `scripts/eval_benchmark.py` | EM/F1, hallucination rate, over-abstention per arm |
+| `scripts/calibrate.py` | Fit gate thresholds on labelled data → `reports/calibration.json` |
+| `scripts/risk_coverage.py` | Risk–coverage curves, AURC, figures |
+| `scripts/judge_agreement.py` | NLI-vs-LLM-judge correlation, Cohen's κ, latency cost |
 | `scripts/smoke_test.py` | Staged component verification (24 checks, no LLM needed) |
 | `scripts/bench_latency.py` | Warm per-stage latency of the confidence layer |
 | `scripts/make_thumbnail.py` | Regenerates `assets/thumbnail.png` (architecture banner) |
 | `scripts/make_milestone_report.py` | Regenerates the milestone report `.docx` |
-| `tests/` | Unit tests for the scoring maths and the gate decision table |
+| `tests/` | Unit tests for the scoring maths, gate decision table, and eval statistics |
 
 ---
 
@@ -132,9 +152,13 @@ logs the disagreement, which is the basis of the local-vs-LLM-judge agreement st
 
 ## Status
 
-**Milestone 1 complete** (due 27 Aug 2026). Environment, ingestion, retrieval, both gates,
-composite scoring, telemetry, Streamlit app and monitoring dashboard all implemented and
-verified:
+**Milestones 1–3 complete.** Environment, ingestion, retrieval, both gates,
+composite scoring, telemetry, Streamlit app and monitoring dashboard (M1);
+local generation end to end, the SQuAD 2.0 harness and the baseline control
+arm (M2); threshold calibration, risk–coverage analysis and the
+NLI-vs-LLM-judge agreement study (M3).
+
+### Milestone 1 (27 Aug 2026)
 
 | Check | Command | Result |
 |---|---|---|
@@ -148,17 +172,77 @@ while an out-of-corpus question scores 0.000 and abstains before the generator i
 a grounded answer scores 0.997 at Gate B while a fabricated one scores 0.000 and is
 labelled *Evident Conflict*.
 
-**Thresholds are uncalibrated placeholders.** They are replaced by values fitted on a
-labelled dev split (SQuAD 2.0 answerable/unanswerable) in Milestone 3. Shipping a
-guessed threshold and calling it tuned would be the exact overconfidence this project
-is about.
+### Milestone 2 (local generation, SQuAD 2.0 harness, control arm)
+
+150-item SQuAD 2.0 dev sample (75 answerable / 75 unanswerable, gold paragraph +
+4 cross-article distractors each), run through both arms with `llama3.1:8b`
+(calibrated thresholds, final scorer):
+
+| Metric | Guarded (gates on) | Baseline (control) |
+| --- | --- | --- |
+| Hallucination rate (unanswerable) | **0.107** | 1.00 |
+| Over-abstention rate (answerable) | 0.72 | 0.00 |
+| Exact match | **0.447** | 0.127 |
+| F1 | **0.499** | 0.249 |
+
+The control arm answers every unanswerable question — a 100% hallucination rate —
+because nothing ever tells it to stop. The guarded arm abstains on 89% of them
+while answering more answerable questions correctly than the baseline answers in
+total. The remaining over-abstention is dominated by Gate B refusing
+llama3.1:8b's fragmentary extractive answers (see *Known limitations* below).
+
+### Milestone 3 (calibration, risk–coverage, judge agreement)
+
+Thresholds fitted on the labelled dev sample (`scripts/calibrate.py`, full sweep
+tables in `reports/calibration.json`):
+
+| Gate | Signal | AUC | Fitted threshold | Fitting criterion |
+| --- | --- | --- | --- | --- |
+| A (retrieval sufficiency) | ms-marco rerank relevancy | 0.652 | 0.45 | Youden's J (answerable recall 0.80) |
+| B (groundedness) | DeBERTa NLI faithfulness | 0.594 | 0.25 | F1 on the grounded proxy, constrained above the contradiction cap |
+| Composite | weighted harmonic mean | — | 0.33 | 10% above the both-marginal corner |
+
+A logistic regression over all four Gate A features (reranker + three embedding
+statistics) reaches only cv-AUC 0.673 vs 0.652 for the reranker alone — the cheap
+single-signal design is within noise of the multivariate fit.
+
+Risk–coverage (`scripts/risk_coverage.py`, figures in `reports/figures/`):
+
+| Arm | AURC | Risk @ 50% coverage | Risk @ 80% coverage |
+| --- | --- | --- | --- |
+| Guarded | **0.635** | 0.480 | 0.550 |
+| Baseline | 0.866 | 0.840 | 0.873 |
+
+**Two Gate B defects were found and fixed during calibration** — both are the
+kind of thing the measurement exists to surface:
+
+1. *Spurious cross-context contradictions*: nli-deberta's contradiction head
+   fires on unrelated premises (an etymology paragraph "contradicts" a
+   steam-engine claim at p=0.92). The old worst-case-over-all-contexts rule
+   false-flagged 14 of 37 fully-entailed claims. Contradiction is now read from
+   the claim's best-entailing context; the max over contexts applies only when
+   nothing entails the claim.
+2. *Broken judge verdicts*: `qwen2.5:7b-instruct` answers "no" to every DeepEval
+   faithfulness verdict regardless of the claim (deterministic at temperature 0),
+   making its scores meaningless. The judge is now `gemma2:latest`, which follows
+   the yes/no convention correctly; the judge adapter also repairs the malformed
+   JSON small local models emit (missing commas, code fences).
+
+The full sweep data and per-arm confusion tables are in `reports/benchmark_m2.json`,
+`reports/calibration.json`, and `reports/risk_coverage.json`.
+
+**Known limitations** (honest accounting, Milestone 4 targets): Gate B has no
+grounded-answer ground truth for its threshold — the answerable/unanswerable
+proxy is imperfect, and llama3.1:8b's fragmentary answers ("New Orleans [1]")
+are not proper NLI hypotheses, which depresses Gate B scores on answerable
+questions and drives most of the over-abstention. HotpotQA multi-hop items
+will stress Gate A's top-2-mean aggregation; the RAGTruth taxonomy spot-check
+will validate the claim labels against human judgement.
 
 ### Remaining milestones (weekly)
 
 | Milestone | Due | Focus |
 |---|---|---|
-| 2 | 3 Sep 2026 | Local generation end to end; SQuAD 2.0 harness; baseline control arm |
-| 3 | 10 Sep 2026 | Threshold calibration; risk–coverage curves and AURC; NLI-vs-LLM-judge agreement |
 | 4 | 17 Sep 2026 | HotpotQA multi-hop; ablations; RAGTruth taxonomy spot-check |
 | 5 | 24 Sep 2026 | Results consolidation, reproducibility pass, final report and demo |
 

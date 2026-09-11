@@ -107,10 +107,13 @@ class TestClaimSplitting:
         assert split_claims("1919") == ["1919"]
 
 
-def _gate_a(score: float, threshold: float = 0.45) -> GateAResult:
+def _gate_a(score: float, threshold: float | None = None) -> GateAResult:
+    from src.config import settings
+
+    t = settings.confidence.gate_a_threshold if threshold is None else threshold
     return GateAResult(
         score=score,
-        passed=score >= threshold,
+        passed=score >= t,
         rerank_relevancy=score,
         top_similarity=0.6,
         mean_similarity=0.5,
@@ -128,10 +131,13 @@ def _claim(entail: float, contra: float) -> ClaimScore:
     )
 
 
-def _gate_b(score: float, claims=None, threshold: float = 0.60) -> GateBResult:
+def _gate_b(score: float, claims=None, threshold: float | None = None) -> GateBResult:
+    from src.config import settings
+
+    t = settings.confidence.gate_b_threshold if threshold is None else threshold
     return GateBResult(
         score=score,
-        passed=score >= threshold,
+        passed=score >= t,
         nli_faithfulness=score,
         claims=claims or [],
     )
@@ -176,9 +182,25 @@ class TestGateDecisionTable:
         assert not report.generation_skipped
 
     def test_marginal_pair_is_flagged_not_abstained(self):
-        """Both gates clear their own bar, but the composite does not."""
-        report = self.ev.decide(_gate_a(0.46), _gate_b(0.61))
-        assert report.composite < self.ev.cfg.composite_threshold
+        """Both gates clear their own bar, but the composite does not.
+
+        Constructed from the live thresholds so the test survives calibration
+        changing the numbers. The composite band sits 10% above the harmonic
+        of two both-marginal gate passes, so a pair only a hair above both
+        thresholds passes the gates individually yet stays below the band.
+        """
+        from src.config import settings
+
+        t_a = settings.confidence.gate_a_threshold
+        t_b = settings.confidence.gate_b_threshold
+        a, b = t_a + 0.01, t_b + 0.02
+        # Sanity: with the shipped band this pair must land in the flag band;
+        # if calibration ever narrows the band below the marginal corner the
+        # invariant itself has been broken and this assert fires.
+        assert weighted_harmonic_mean([a, b], settings.confidence.weights) < (
+            settings.confidence.composite_threshold
+        ), "flag band must stay above the both-marginal corner"
+        report = self.ev.decide(_gate_a(a), _gate_b(b))
         assert report.verdict == "flag_low_confidence"
         assert not report.abstained
 

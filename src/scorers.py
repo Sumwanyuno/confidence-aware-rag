@@ -20,6 +20,7 @@ several-thousand-question benchmark sweep feasible on a laptop.
 from __future__ import annotations
 
 import functools
+import json
 import logging
 import re
 from dataclasses import dataclass
@@ -152,6 +153,21 @@ class NLIScorer:
         premise) is deliberate: a claim supported by passage 3 alone is properly
         grounded, and concatenation would push the real premise past the
         model's 512-token window.
+
+        Contradiction is read only from the context the claim actually engages
+        with. nli-deberta's contradiction head fires spuriously on unrelated
+        premises (an etymology paragraph "contradicts" a steam-engine claim
+        with p=0.92), and a max over five premises turns that noise into a
+        hard gate failure for answers the gold passage fully entails: on the
+        SQuAD harness, 14 of 37 fully-entailed claims were false-flagged this
+        way. The rule: if any context entails the claim (entailment >= 0.5),
+        that context owns the decision and its own contradiction is what
+        counts; only when no context supports the claim does the strongest
+        contradiction over all contexts decide, exactly as before. The known
+        cost, accepted deliberately: a genuinely split corpus (one source
+        supports, another truly contradicts) will be labelled supported, not
+        conflicted. Measured noise in the contradiction head makes that trade
+        worth it; revisit with a stronger NLI model.
         """
         if not claims or not contexts:
             return []
@@ -169,14 +185,18 @@ class NLIScorer:
         for ci, claim in enumerate(claims):
             rows = probs[ci * n_ctx : (ci + 1) * n_ctx]
             best = int(max(range(n_ctx), key=lambda j: rows[j][e_i]))
+            if rows[best][e_i] >= 0.5:
+                # A context supports the claim: it owns the contradiction call.
+                contra = float(rows[best][c_i])
+            else:
+                # No support anywhere: worst-case contradiction across passages.
+                contra = float(max(r[c_i] for r in rows))
             out.append(
                 ClaimScore(
                     claim=claim,
                     entailment=float(rows[best][e_i]),
                     neutral=float(rows[best][n_i]),
-                    # Worst-case contradiction across all passages: conflicting
-                    # with any source is a conflict, even if another is neutral.
-                    contradiction=float(max(r[c_i] for r in rows)),
+                    contradiction=contra,
                     best_context_index=best,
                 )
             )
@@ -242,12 +262,59 @@ class RerankScorer:
         return float(sum(ranked[:2]) / min(2, len(ranked))), scores
 
 
+def _repair_judge_json(t: str) -> str:
+    """Fix the two malformations a small local judge produces inside JSON.
+
+    qwen2.5:7b reliably omits the comma between consecutive string list items
+    and occasionally drops one between object members. Rather than failing the
+    metric call, insert commas where a quote-close is directly followed by a
+    quote-open (or a closing brace) with nothing between.
+    """
+    return re.sub(r'(["\]}])\s*(?=["{])', r"\1, ", t)
+
+
+def _parse_judge_json(text: str, schema):
+    """Parse a local judge's reply into a DeepEval schema object.
+
+    Small local models wrap JSON in code fences, prepend prose, or emit
+    slightly malformed JSON. DeepEval's own fallback assumes a clean response
+    and crashes the metric, so the recovery ladder lives here: strip fences,
+    parse, repair, salvage the outermost object. One retry with an explicit
+    "output only JSON" reminder handles the rest.
+    """
+    t = text.strip()
+    if t.startswith("```"):
+        t = t.removeprefix("```json").removeprefix("```").strip()
+        if t.endswith("```"):
+            t = t[: t.rfind("```")].strip()
+    for candidate in (t, _repair_judge_json(t)):
+        try:
+            return schema(**json.loads(candidate))
+        except ValueError:
+            continue
+    start, end = t.find("{"), t.rfind("}")
+    if start >= 0 and end > start:
+        body = t[start : end + 1]
+        for candidate in (body, _repair_judge_json(body)):
+            try:
+                return schema(**json.loads(candidate))
+            except ValueError:
+                continue
+    raise ValueError(f"unparseable judge reply: {text[:120]!r}")
+
+
 def _build_deepeval_judge():
     """Create the DeepEval judge, subclassing its base class at runtime.
 
     Built dynamically because DeepEval's base class must be imported before it
     can be subclassed, and importing DeepEval at module scope would make the
     local NLI path depend on a package it never uses.
+
+    ``generate`` honours DeepEval's ``schema=`` protocol: the metrics pass a
+    pydantic model and expect an instance back. Without it the caller falls
+    back to JSON-parsing the raw text, which a small local judge model fails
+    at just often enough to crash the metric with "'str' object has no
+    attribute 'verdicts'".
     """
     from deepeval.models.base_model import DeepEvalBaseLLM
 
@@ -260,12 +327,26 @@ def _build_deepeval_judge():
         def load_model(self):
             return self._chat
 
-        def generate(self, prompt: str, *args, **kwargs) -> str:
+        def _invoke(self, prompt: str) -> str:
             return str(self._chat.invoke(prompt).content)
 
-        async def a_generate(self, prompt: str, *args, **kwargs) -> str:
-            reply = await self._chat.ainvoke(prompt)
-            return str(reply.content)
+        def generate(self, prompt: str, *args, schema=None, **kwargs):
+            text = self._invoke(prompt)
+            if schema is None:
+                return text
+            try:
+                return _parse_judge_json(text, schema)
+            except ValueError:
+                # One retry with an explicit format reminder; a second failure
+                # propagates and the caller logs a judge error, as before.
+                reminder = prompt + "\n\nRespond with ONLY the JSON object, no prose, no code fences."
+                return _parse_judge_json(self._invoke(reminder), schema)
+
+        async def a_generate(self, prompt: str, *args, schema=None, **kwargs):
+            text = str((await self._chat.ainvoke(prompt)).content)
+            if schema is None:
+                return text
+            return _parse_judge_json(text, schema)
 
         def get_model_name(self) -> str:
             return f"{settings.llm.provider}:{settings.llm.judge_model}"

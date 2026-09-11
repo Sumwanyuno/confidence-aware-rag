@@ -107,6 +107,44 @@ if lat_cols:
 
 st.divider()
 
+# --- Benchmark comparison (guarded vs baseline) ------------------------------
+# The evaluation chapter's central table, computed live from telemetry so it
+# stays in sync with whatever sweep was last run.
+bench_df = df[df["run_tag"].notna() & (df["run_tag"] != "smoke") & df["item_id"].notna()] if "item_id" in df.columns else df.iloc[0:0]
+if not bench_df.empty and "arm" in bench_df.columns and bench_df["arm"].nunique() > 1:
+    import pandas as pd
+
+    st.subheader("Benchmark comparison: guarded vs baseline")
+    st.caption(
+        "Same questions, both arms (run_tag="
+        + ", ".join(sorted(bench_df["run_tag"].unique()))
+        + "). Hallucination = answered an unanswerable question; "
+        "over-abstention = refused an answerable one."
+    )
+
+    rows = []
+    for arm, sub in bench_df.groupby("arm"):
+        rows.append(
+            {
+                "arm": arm,
+                "n": len(sub),
+                "answered": int((~sub["verdict"].str.startswith("abstain")).sum()),
+                "abstained": int(sub["verdict"].str.startswith("abstain").sum()),
+                "mean composite": round(sub["composite"].mean(), 3),
+                "conflicts caught": int(sub["n_conflicts"].fillna(0).sum()),
+                "baseless caught": int(sub["n_baseless"].fillna(0).sum()),
+                "mean latency ms": round(sub["total_ms"].mean(), 0),
+            }
+        )
+    comp = pd.DataFrame(rows).set_index("arm")
+    st.dataframe(comp.T, use_container_width=True)
+
+    verdicts = bench_df.groupby(["arm", "verdict"]).size().unstack(fill_value=0)
+    st.bar_chart(verdicts, height=280)
+    st.caption("Verdict mix per arm. The baseline arm has no gate enforcement, so it can only answer.")
+
+st.divider()
+
 # --- Raw log -----------------------------------------------------------------
 st.subheader("Query log")
 show = [

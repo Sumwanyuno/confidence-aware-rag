@@ -83,7 +83,7 @@ _BUILDERS = {
 # Sensible per-provider defaults, used when the configured model name is
 # obviously meant for a different provider (e.g. "llama3.1:8b" on Groq).
 _DEFAULTS: dict[Provider, dict[str, str]] = {
-    "ollama": {"generator": "llama3.1:8b", "judge": "qwen2.5:7b-instruct"},
+    "ollama": {"generator": "llama3.1:8b", "judge": "gemma2:latest"},
     "groq": {"generator": "llama-3.3-70b-versatile", "judge": "llama-3.1-8b-instant"},
     "gemini": {"generator": "gemini-2.5-flash", "judge": "gemini-2.5-flash-lite"},
 }

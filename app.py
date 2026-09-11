@@ -76,8 +76,8 @@ def _sidebar() -> dict:
     top_k = st.sidebar.slider("Passages retrieved (k)", 1, 12, settings.retrieval.top_k)
 
     st.sidebar.caption(
-        "Thresholds are uncalibrated placeholders until scripts/calibrate.py "
-        "has been run against a labelled dev split."
+        "Thresholds calibrated on the SQuAD 2.0 dev sample (see "
+        "reports/calibration.json); sliders override them for this session only."
     )
 
     baseline = st.sidebar.checkbox(

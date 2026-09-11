@@ -47,7 +47,12 @@ class LLMConfig:
     max_tokens: int = 512
 
     # Judging (LLM-as-judge path)
-    judge_model: str = os.getenv("RAG_JUDGE_MODEL", "qwen2.5:7b-instruct")
+    # Judge kept separate from the generator (self-preference bias). Note:
+    # qwen2.5:7b-instruct was the original choice but answers "no" to every
+    # DeepEval faithfulness verdict regardless of the claim (broken polarity,
+    # deterministic at temperature 0), which makes its scores meaningless.
+    # gemma2 follows the yes/no convention correctly in the same probes.
+    judge_model: str = os.getenv("RAG_JUDGE_MODEL", "gemma2:latest")
     judge_temperature: float = 0.0
 
     # Networking
@@ -77,20 +82,27 @@ class RetrievalConfig:
 class ConfidenceConfig:
     """Thresholds and weights for the two-gate confidence layer.
 
-    The defaults below are *placeholders*. They are replaced by the values
-    written to reports/calibration.json once scripts/calibrate.py has been run
-    against a labelled dev split (see Milestone 3). Shipping uncalibrated
-    thresholds and calling them tuned would be the exact overconfidence this
-    project is about.
+    The values below are calibrated (Milestone 3) against the labelled SQuAD
+    2.0 dev sample: Gate A by Youden's J on answerable/unanswerable, Gate B by
+    F1 on the answerable-as-grounded proxy, the composite as the weighted
+    harmonic mean of the two chosen operating points. The fitting data and the
+    full sweep tables live in reports/calibration.json (run scripts/calibrate.py
+    --tag squad2-dev to regenerate).
     """
 
     # Gate A - retrieval sufficiency, evaluated BEFORE generation.
+    # Fitted: AUC 0.652, Youden J 0.24, answerable recall 0.80 at t=0.45.
     gate_a_threshold: float = 0.45
     # Gate B - answer groundedness, evaluated AFTER generation.
-    gate_b_threshold: float = 0.60
+    # Fitted: AUC 0.594, F1 0.481 at t=0.25; constrained to stay above the
+    # contradiction cap (0.15) so calibration cannot weaken the hard-fail rule.
+    gate_b_threshold: float = 0.25
     # Composite score below this is reported as low confidence even if both
-    # individual gates squeaked through.
-    composite_threshold: float = 0.55
+    # individual gates squeaked through. Set 10% above the harmonic composite
+    # of two both-marginal gate passes: at the corner value itself the band
+    # would be empty, because no pair that passed both gates can composite
+    # below the corner (the harmonic mean is monotone in both arguments).
+    composite_threshold: float = 0.33
 
     # Weighted harmonic mean weights: (retrieval_relevancy, faithfulness).
     # Faithfulness is weighted higher because a fluent-but-unsupported answer

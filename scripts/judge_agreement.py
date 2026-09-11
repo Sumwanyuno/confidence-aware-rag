@@ -1,0 +1,103 @@
+"""NLI-vs-LLM-judge agreement study (Milestone 3).
+
+The confidence layer's claim is that cheap local cross-encoders can replace a
+slower LLM judge for the two gate decisions. This script measures that claim
+instead of asserting it: on a subset of the benchmark, both scorers ran on the
+same items (``RAG_SCORER=both``), so telemetry holds their scores side by
+side. We report correlation, Cohen's kappa on the pass/fail decision, the
+disagreement cases, and what the judge costs in latency.
+
+    python scripts/judge_agreement.py --tag squad2-judge
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+import pandas as pd  # noqa: E402
+
+from src.config import REPORTS_DIR, settings  # noqa: E402
+from src.evalstats import judge_agreement  # noqa: E402
+from src.store import connect, init_db  # noqa: E402
+
+
+def load_run(tag: str) -> pd.DataFrame:
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM queries WHERE run_tag = ? ORDER BY id", (tag,)
+        ).fetchall()
+    if not rows:
+        raise SystemExit(f"No telemetry rows found for run_tag {tag!r}.")
+    return pd.DataFrame([dict(r) for r in rows])
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--tag", default="squad2-judge")
+    ap.add_argument("--out", type=Path, default=REPORTS_DIR / "judge_agreement.json")
+    args = ap.parse_args()
+
+    df = load_run(args.tag)
+    both = df[df["llm_faithfulness"].notna() | df["llm_relevancy"].notna()]
+    if both.empty:
+        raise SystemExit(
+            "No rows carry judge scores. Re-run the subset with RAG_SCORER=both "
+            "(scripts/run_benchmark.py --tag squad2-judge does this automatically)."
+        )
+
+    thresholds = json.loads(both["thresholds_json"].iloc[0]) if both["thresholds_json"].iloc[0] else {}
+    t_a = float(thresholds.get("gate_a", settings.confidence.gate_a_threshold))
+    t_b = float(thresholds.get("gate_b", settings.confidence.gate_b_threshold))
+
+    gate_a = judge_agreement(
+        both["rerank_relevancy"].tolist(), both["llm_relevancy"].tolist(), t_a
+    )
+    gate_b = judge_agreement(
+        both["nli_faithfulness"].tolist(), both["llm_faithfulness"].tolist(), t_b
+    )
+
+    # Latency cost of the judge: rows where it ran vs the nli-only sweep.
+    with connect() as conn:
+        nli_rows = conn.execute(
+            "SELECT AVG(gate_a_ms), AVG(gate_b_ms) FROM queries "
+            "WHERE run_tag != ? AND scorer = 'nli' AND arm = 'guarded'",
+            (args.tag,),
+        ).fetchone()
+    report = {
+        "run_tag": args.tag,
+        "n": len(both),
+        "thresholds_used": {"gate_a": t_a, "gate_b": t_b},
+        "gate_a_relevancy": gate_a,
+        "gate_b_faithfulness": gate_b,
+        "latency_ms": {
+            "judge_run_gate_a_mean": round(float(both["gate_a_ms"].mean()), 1),
+            "judge_run_gate_b_mean": round(float(both["gate_b_ms"].dropna().mean()), 1),
+            "nli_only_gate_a_mean": round(float(nli_rows[0] or 0), 1),
+            "nli_only_gate_b_mean": round(float(nli_rows[1] or 0), 1),
+        },
+    }
+
+    print(f"Agreement study on {len(both)} items (thresholds: A={t_a}, B={t_b})")
+    for name, g in (("Gate A (relevancy)", gate_a), ("Gate B (faithfulness)", gate_b)):
+        d = g.get("decision_agreement", {})
+        print(
+            f"  {name}: n={g['n']}  pearson={g['pearson']}  spearman={g['spearman']}  "
+            f"kappa={d.get('cohens_kappa')}  observed={d.get('observed_agreement')}"
+        )
+    print(f"  Latency: judge run {report['latency_ms']['judge_run_gate_b_mean']}ms vs "
+          f"nli-only {report['latency_ms']['nli_only_gate_b_mean']}ms (Gate B)")
+
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    args.out.write_text(json.dumps(report, indent=2), encoding="utf-8")
+    print(f"Wrote {args.out}")
+    return 0
+
+
+if __name__ == "__main__":
+    init_db()
+    raise SystemExit(main())
