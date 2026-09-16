@@ -54,6 +54,10 @@ class LLMConfig:
     # gemma2 follows the yes/no convention correctly in the same probes.
     judge_model: str = os.getenv("RAG_JUDGE_MODEL", "gemma2:latest")
     judge_temperature: float = 0.0
+    # The judge emits JSON verdict lists over up to 5 paragraphs, which can
+    # exceed the answer budget and truncate mid-JSON (unparseable), so it gets
+    # its own, larger generation cap.
+    judge_max_tokens: int = 2048
 
     # Networking
     ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")

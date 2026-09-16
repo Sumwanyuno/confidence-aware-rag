@@ -1,40 +1,40 @@
 {
-  "run_tag": "squad2-v2",
+  "run_tag": "squad2-dev",
   "n_rows": 300,
   "arms": {
     "guarded": {
       "n": 150,
       "n_answerable": 75,
       "n_unanswerable": 75,
-      "answered": 29,
-      "abstained": 121,
-      "abstention_rate": 0.8067,
-      "hallucination_rate": 0.1067,
-      "over_abstention_rate": 0.72,
-      "em": 0.4467,
-      "f1": 0.4992,
+      "answered": 15,
+      "abstained": 135,
+      "abstention_rate": 0.9,
+      "hallucination_rate": 0.04,
+      "over_abstention_rate": 0.84,
+      "em": 0.48,
+      "f1": 0.5086,
       "em_answerable": 0.0,
-      "f1_answerable": 0.105,
-      "em_unanswerable": 0.8933,
-      "f1_unanswerable": 0.8933,
-      "mean_latency_ms": 1711.1,
+      "f1_answerable": 0.0572,
+      "em_unanswerable": 0.96,
+      "f1_unanswerable": 0.96,
+      "mean_latency_ms": 3624.4,
       "verdicts": {
         "abstain_no_context": 78,
-        "abstain_ungrounded": 43,
-        "answer": 29
+        "abstain_ungrounded": 57,
+        "answer": 15
       },
       "confusion": {
         "unanswerable": {
           "n": 75,
-          "answered": 8,
-          "abstained": 67,
-          "mean_f1": 0.8933
+          "answered": 3,
+          "abstained": 72,
+          "mean_f1": 0.96
         },
         "answerable": {
           "n": 75,
-          "answered": 21,
-          "abstained": 54,
-          "mean_f1": 0.105
+          "answered": 12,
+          "abstained": 63,
+          "mean_f1": 0.0572
         }
       }
     },

@@ -71,6 +71,26 @@ def load_documents(directory: Path | str = RAW_DIR) -> list[Document]:
     return docs
 
 
+def _split_markdown_sections(text: str) -> list[Document]:
+    """Split a markdown document on its headings before chunking.
+
+    A heading is a semantic boundary, and letting the next section's header
+    bleed into the previous chunk's tail is not cosmetic: measured on the
+    course notes, a stray ``## Unit 3`` header at the end of a Unit 2 chunk
+    collapses nli-deberta entailment for claims that chunk fully supports
+    from 0.99 to 0.001 - the model reads the mixed-premise passage as being
+    about something else. Sections longer than the chunk size still go through
+    the recursive splitter afterwards.
+    """
+    from langchain_text_splitters import MarkdownHeaderTextSplitter
+
+    splitter = MarkdownHeaderTextSplitter(
+        headers_to_split_on=[("#", "h1"), ("##", "h2"), ("###", "h3")],
+        strip_headers=False,
+    )
+    return splitter.split_text(text)
+
+
 def chunk_documents(docs: list[Document]) -> list[Document]:
     """Split on natural boundaries first, falling back to characters.
 
@@ -78,6 +98,8 @@ def chunk_documents(docs: list[Document]) -> list[Document]:
     chunks semantically whole, which directly improves the NLI entailment
     signal the confidence layer depends on. Mid-sentence chunks produce
     passages that entail nothing and depress Gate A scores for no good reason.
+    Markdown documents are first divided on their headings (see
+    ``_split_markdown_sections``).
     """
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=settings.retrieval.chunk_size,
@@ -85,7 +107,15 @@ def chunk_documents(docs: list[Document]) -> list[Document]:
         separators=["\n\n", "\n", ". ", " ", ""],
         length_function=len,
     )
-    chunks = splitter.split_documents(docs)
+
+    pieces: list[Document] = []
+    for doc in docs:
+        if doc.metadata.get("source", "").lower().endswith(".md"):
+            pieces.extend(_split_markdown_sections(doc.page_content))
+        else:
+            pieces.append(doc)
+
+    chunks = splitter.split_documents(pieces)
     for i, c in enumerate(chunks):
         c.metadata["chunk_index"] = i
         c.metadata.setdefault("source", "unknown")

@@ -10,6 +10,7 @@ confidence layer is a property of the pipeline, not of one particular model.
 
 from __future__ import annotations
 
+import dataclasses
 import functools
 import logging
 
@@ -106,8 +107,9 @@ def _resolve_model(name: str, provider: Provider, role: str) -> str:
 
 
 @functools.lru_cache(maxsize=8)
-def _cached(provider: Provider, model: str, temperature: float) -> BaseChatModel:
+def _cached(provider: Provider, model: str, temperature: float, max_tokens: int) -> BaseChatModel:
     cfg = settings.llm
+    cfg = dataclasses.replace(cfg, max_tokens=max_tokens)
     try:
         return _BUILDERS[provider](model, temperature, cfg)
     except ImportError as exc:  # pragma: no cover - environment dependent
@@ -120,14 +122,14 @@ def get_generator() -> BaseChatModel:
     """The model that writes the answer."""
     cfg = settings.llm
     model = _resolve_model(cfg.generator_model, cfg.provider, "generator")
-    return _cached(cfg.provider, model, cfg.temperature)
+    return _cached(cfg.provider, model, cfg.temperature, cfg.max_tokens)
 
 
 def get_judge() -> BaseChatModel:
     """The model that scores the answer. Deliberately not the generator."""
     cfg = settings.llm
     model = _resolve_model(cfg.judge_model, cfg.provider, "judge")
-    return _cached(cfg.provider, model, cfg.judge_temperature)
+    return _cached(cfg.provider, model, cfg.judge_temperature, cfg.judge_max_tokens)
 
 
 def health_check() -> tuple[bool, str]:
