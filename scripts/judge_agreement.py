@@ -63,22 +63,32 @@ def main() -> int:
 
     # Latency cost of the judge: rows where it ran vs the nli-only sweep.
     with connect() as conn:
-        nli_rows = conn.execute(
-            "SELECT AVG(gate_a_ms), AVG(gate_b_ms) FROM queries "
-            "WHERE run_tag != ? AND scorer = 'nli' AND arm = 'guarded'",
-            (args.tag,),
-        ).fetchone()
+        nli_lat = pd.DataFrame(
+            [
+                dict(r)
+                for r in conn.execute(
+                    "SELECT gate_a_ms, gate_b_ms FROM queries "
+                    "WHERE run_tag != ? AND scorer = 'nli' AND arm = 'guarded'",
+                    (args.tag,),
+                )
+            ]
+        )
+    nli_rows = (nli_lat["gate_a_ms"].median(), nli_lat["gate_b_ms"].median())
     report = {
         "run_tag": args.tag,
         "n": len(both),
         "thresholds_used": {"gate_a": t_a, "gate_b": t_b},
         "gate_a_relevancy": gate_a,
         "gate_b_faithfulness": gate_b,
+        # Medians, not means. Two rows in this run carry Gate A latencies of 10
+        # and 36 hours: the laptop suspended mid-sweep and the wall-clock timer
+        # kept counting. A mean over 36 items is destroyed by that; the median
+        # is not. The same reason applies to every latency figure in the report.
         "latency_ms": {
-            "judge_run_gate_a_mean": round(float(both["gate_a_ms"].mean()), 1),
-            "judge_run_gate_b_mean": round(float(both["gate_b_ms"].dropna().mean()), 1),
-            "nli_only_gate_a_mean": round(float(nli_rows[0] or 0), 1),
-            "nli_only_gate_b_mean": round(float(nli_rows[1] or 0), 1),
+            "judge_run_gate_a_median": round(float(both["gate_a_ms"].median()), 1),
+            "judge_run_gate_b_median": round(float(both["gate_b_ms"].dropna().median()), 1),
+            "nli_only_gate_a_median": round(float(nli_rows[0] or 0), 1),
+            "nli_only_gate_b_median": round(float(nli_rows[1] or 0), 1),
         },
     }
 
@@ -89,8 +99,8 @@ def main() -> int:
             f"  {name}: n={g['n']}  pearson={g['pearson']}  spearman={g['spearman']}  "
             f"kappa={d.get('cohens_kappa')}  observed={d.get('observed_agreement')}"
         )
-    print(f"  Latency: judge run {report['latency_ms']['judge_run_gate_b_mean']}ms vs "
-          f"nli-only {report['latency_ms']['nli_only_gate_b_mean']}ms (Gate B)")
+    print(f"  Latency: judge run {report['latency_ms']['judge_run_gate_b_median']}ms vs "
+          f"nli-only {report['latency_ms']['nli_only_gate_b_median']}ms (Gate B, medians)")
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(report, indent=2), encoding="utf-8")

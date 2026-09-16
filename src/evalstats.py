@@ -170,10 +170,15 @@ def judge_agreement(
     """
     if len(nli_scores) != len(llm_scores):
         raise ValueError("score lists must be the same length")
+    # NaN as well as None: reading telemetry through pandas turns SQL NULL into
+    # float('nan'), which passes an ``is not None`` test and then silently
+    # poisons every sum it touches. Rows where only one scorer ran are simply
+    # not comparable, so they are dropped here rather than reported as NaN.
     pairs = [
         (nli, llm)
         for nli, llm in zip(nli_scores, llm_scores, strict=True)
         if nli is not None and llm is not None
+        and not math.isnan(float(nli)) and not math.isnan(float(llm))
     ]
     if not pairs:
         return {"n": 0}
