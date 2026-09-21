@@ -152,11 +152,13 @@ logs the disagreement, which is the basis of the local-vs-LLM-judge agreement st
 
 ## Status
 
-**Milestones 1–3 complete.** Environment, ingestion, retrieval, both gates,
+**Milestones 1–4 complete.** Environment, ingestion, retrieval, both gates,
 composite scoring, telemetry, Streamlit app and monitoring dashboard (M1);
 local generation end to end, the SQuAD 2.0 harness and the baseline control
 arm (M2); threshold calibration, risk–coverage analysis and the
-NLI-vs-LLM-judge agreement study (M3).
+NLI-vs-LLM-judge agreement study (M3); HotpotQA multi-hop evaluation,
+chunk-vs-sentence granularity ablation, and the Gate B architectural
+diagnosis (M4).
 
 ### Milestone 1 (27 Aug 2026)
 
@@ -239,11 +241,53 @@ questions and drives most of the over-abstention. HotpotQA multi-hop items
 will stress Gate A's top-2-mean aggregation; the RAGTruth taxonomy spot-check
 will validate the claim labels against human judgement.
 
-### Remaining milestones (weekly)
+### Milestone 4 (HotpotQA multi-hop, granularity ablation)
+
+150-item HotpotQA dev sample, chunk vs. sentence indexing, both arms with
+`llama3.1:8b` (full data in `reports/retrieval_ablation_m4.json` and
+`reports/generation_hotpot_m4.json`):
+
+**Retrieval dynamics** — 800-character chunks act as a volume dragnet,
+mechanically boosting full recall by +35.3 points over strict sentence
+indexing (66.0% vs 30.7%). The chunk index averages 11.8 units per item
+against 40.8 for sentences; retrieving 5 chunks simply covers more source
+text.
+
+| Metric | Sentence | Chunk | Δ |
+| --- | --- | --- | --- |
+| Supporting-fact recall | 58.5% | 82.3% | +23.8 pp |
+| Full recall (all facts retrieved) | 30.7% | 66.0% | **+35.3 pp** |
+
+**Generation performance** — baseline F1 rose from 0.188 (sentence) to
+0.271 (chunk), a **44% improvement**. The LLM successfully synthesises
+answers from the wider chunk context when no confidence gate intervenes.
+
+| Metric | Sent. baseline | Chunk baseline | Sent. guarded | Chunk guarded |
+| --- | --- | --- | --- | --- |
+| F1 | 0.188 | **0.271** | 0.086 | 0.150 |
+| Answer rate | 100% | 100% | 17% | 22% |
+| Gate B contradiction rate | 75% | 71% | 24% | 39% |
+
+**The confidence bottleneck** — Gate B's 70–75% false-contradiction rate
+on HotpotQA is not a bug. DeBERTa correctly rejects multi-hop answers
+because single-premise NLI has no mechanism for chaining reasoning across
+passages. A claim that requires combining Passage A and Passage B is not
+entailed by either passage alone, so the NLI head returns neutral or
+contradiction — structurally correct within its own frame, structurally
+wrong for this task. This is a **definitive architectural boundary**:
+strict single-premise NLI fundamentally bottlenecks multi-hop RAG.
+Addressing it would require multi-premise entailment, explicit reasoning
+decomposition, or an LLM-as-judge replacement — each a substantial
+architectural change, not a threshold adjustment.
+
+Gate A transfers cleanly: mean reranker relevancy is 0.84 for chunks,
+well above the 0.45 threshold. The reranker scores passages independently
+and is unaffected by multi-hop structure.
+
+### Remaining milestone
 
 | Milestone | Due | Focus |
 |---|---|---|
-| 4 | 17 Sep 2026 | HotpotQA multi-hop; ablations; RAGTruth taxonomy spot-check |
 | 5 | 24 Sep 2026 | Results consolidation, reproducibility pass, final report and demo |
 
 ## Running tests
