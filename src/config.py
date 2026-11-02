@@ -121,7 +121,8 @@ class ConfidenceConfig:
 
     # Gate B backend: natural-language-inference cross-encoder. Premise is a
     # retrieved passage, hypothesis is one claim from the generated answer.
-    nli_model: str = "cross-encoder/nli-deberta-v3-base"
+    # RAG_NLI_MODEL may name a local folder, e.g. models/nli-deberta-v3-large.
+    nli_model: str = os.getenv("RAG_NLI_MODEL", "cross-encoder/nli-deberta-v3-base")
     # What Gate B hands NLI as the hypothesis (see scorers.build_hypothesis):
     #   "claim"    -> the answer sentence alone (Gate B v1, Milestones 1-4)
     #   "qa"       -> question + claim, so a bare answer becomes testable

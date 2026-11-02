@@ -287,10 +287,13 @@ def main() -> int:
     ap.add_argument("--skip-squad", action="store_true")
     ap.add_argument("--configs", help="comma-separated subset of configurations, e.g. v1,both")
     ap.add_argument("--hotpot-granularity", choices=("sentence", "chunk"))
+    ap.add_argument("--nli-model", help="override the NLI checkpoint, e.g. cross-encoder/nli-deberta-v3-large")
     ap.add_argument("--out", type=Path, default=REPORTS_DIR / "gate_b_v2.json")
     args = ap.parse_args()
 
     settings.confidence.scorer = "nli"
+    if args.nli_model:
+        settings.confidence.nli_model = args.nli_model
     global MODES, GRANULARITIES
     if args.configs:
         MODES = tuple(c.strip() for c in args.configs.split(","))
