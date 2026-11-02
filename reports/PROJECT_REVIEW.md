@@ -120,8 +120,10 @@ point at your own M2 paragraph.
 
 **Correct wording:** drop aggregate EM as a headline. Lead with the 2×2 table
 (answered/abstained × answerable/unanswerable) and with *selective accuracy*:
-when the guarded system answers, it is right 95% of the time (20/21) and
-hallucinates on 8 of 75 unanswerable questions.
+when the guarded system answers an *answerable* question, it is right 95% of
+the time (20/21), and it hallucinates on 8 of 75 unanswerable questions. Don't
+merge these into "95% of its answers are right": counting the 8 hallucinations,
+20 of its 29 answers (69%) were correct.
 
 ### H5 — The risk–coverage comparison does not measure what M3 says (major)
 
@@ -490,8 +492,9 @@ whole 100–350-word paragraphs as premises and went neutral even on sentences
 the paragraph stated outright. Gate B v2 also scores each claim against
 short 3-sentence windows. In a fresh run it cut over-abstention from 71% to
 48% (paired p < 0.001), for 2 extra hallucinations out of 75 (not
-significant). When the system answers, it is
-right about 95% of the time.
+significant). When it answers an answerable question it is right about 97%
+of the time (38 of 39); counting every answer it gives, including
+hallucinations, 38 of 50 (76%) are correct, against 45% for plain RAG.
 
 **Q: How much of the improvement comes from the prompt rather than the gates?**
 Of 67 refusals on unanswerable questions, 27 came from the generator's own
