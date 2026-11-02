@@ -122,7 +122,9 @@ streamlit run app.py
 | `src/squad_metrics.py` | Official SQuAD 2.0 EM/F1 normalisation + no-answer convention |
 | `src/evalstats.py` | Risk–coverage curves, AURC, judge-agreement statistics |
 | `app.py` | Streamlit Q&A interface showing both gate scores and per-claim analysis |
-| `pages/1_Monitoring_Dashboard.py` | Confidence trends, verdict mix, latency budget, arm comparison |
+| `pages/1_How_to_use.py` | In-app guide: quick start, reading a result, experiments, troubleshooting, glossary |
+| `pages/2_Monitoring_Dashboard.py` | Confidence trends, verdict mix, claims, latency budget, arm comparison, per run |
+| `src/ui.py` | Shared UI pieces: pipeline strip, verdict banner, threshold score bars |
 | `scripts/build_index.py` | Ingest `data/raw/` into ChromaDB |
 | `scripts/build_benchmark.py` | Sample the labelled SQuAD 2.0 dev set (gold + distractors) |
 | `scripts/run_benchmark.py` | Resumable harness: both arms over the benchmark, telemetry-tagged |

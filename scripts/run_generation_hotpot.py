@@ -131,6 +131,10 @@ def run_one_item(
             store=store,
             collection=name,
             baseline=baseline,
+            # Tagged so the dashboard can tell sweep rows from app questions;
+            # the M4 sweep logged without one.
+            run_tag=f"hotpot-{granularity}",
+            item_id=item["item_id"],
         )
 
         # Extract telemetry
