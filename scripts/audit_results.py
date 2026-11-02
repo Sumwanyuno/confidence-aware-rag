@@ -55,6 +55,10 @@ from src.squad_metrics import (  # noqa: E402
 from src.store import connect  # noqa: E402
 
 SQUAD_RUNS = {"m2_uncalibrated": "squad2-dev", "m3_calibrated": "squad2-v2"}
+# Fresh guarded-only runs (M5): identical setup and thresholds, Gate B v1
+# (whole-passage premise) and v2 (sentence-window premise), run back to back
+# so generation noise is shared.
+GATE_B_RUNS = {"m5_gate_b_v1": "squad2-v5-v1", "m5_gate_b_v2": "squad2-v5"}
 CAP = settings.confidence.contradiction_cap
 
 
@@ -149,6 +153,20 @@ def paired_hallucination_change(before: list[dict], after: list[dict]) -> dict:
     only_after = sum(a[i] and not b[i] for i in b)
     return {"hallucinated_only_m2": only_before, "hallucinated_only_m3": only_after,
             "mcnemar_exact_p": r4(mcnemar_exact(only_before, only_after))}
+
+
+def paired_change(before: list[dict], after: list[dict]) -> dict:
+    """Item-paired answered/abstained flips between two guarded runs, per condition."""
+    out = {}
+    b = {r["item_id"]: r for r in before}
+    for key, cond in (("unanswerable_answered", False), ("answerable_answered", True)):
+        ids = [r["item_id"] for r in after if r["answerable"] == cond and r["item_id"] in b]
+        a_ans = {r["item_id"]: not r["abstained"] for r in after}
+        only_before = sum(not b[i]["abstained"] and not a_ans[i] for i in ids)
+        only_after = sum(a_ans[i] and b[i]["abstained"] for i in ids)
+        out[key] = {"only_before": only_before, "only_after": only_after,
+                    "mcnemar_exact_p": r4(mcnemar_exact(only_before, only_after))}
+    return out
 
 
 def detection_quality(baseline: list[dict]) -> dict:
@@ -299,6 +317,13 @@ def main() -> int:
         runs["m2_uncalibrated"]["guarded"], runs["m3_calibrated"]["guarded"])
     report["squad"]["detection_quality_baseline_arm"] = detection_quality(runs["m3_calibrated"]["baseline"])
     report["squad"]["heldout_gate_a_calibration"] = heldout_calibration(runs["m3_calibrated"]["baseline"])
+    fresh = {name: load_squad(tag, labels)["guarded"] for name, tag in GATE_B_RUNS.items()}
+    if all(fresh.values()):
+        for name, rows in fresh.items():
+            report["squad"][name] = {"guarded": squad_arm_summary(rows),
+                                     "guarded_abstention_sources": abstention_sources(rows)}
+        report["squad"]["m5_gate_b_v1_to_v2"] = paired_change(
+            fresh["m5_gate_b_v1"], fresh["m5_gate_b_v2"])
     report["hotpot"] = hotpot_audit(args.hotpot_rows)
 
     args.out.write_text(json.dumps(report, indent=2), encoding="utf-8")

@@ -353,16 +353,42 @@ benchmark. v2 is now the default (`nli_premise="window"` in
   in meaningfully more wrong ones.
 - **Cost.** Gate B median 119 ms → 196 ms (more premise pairs). Still
   negligible next to ~3 s of generation.
-- **Not yet end-to-end.** These are stored answers re-scored. A fresh guarded
-  run with v2 (about 5 minutes on Ollama) would confirm it; until then, call it
-  "offline re-scoring of the M3 answers".
+
+**End-to-end confirmation (fresh runs, 2 Nov).** Two fresh guarded SQuAD
+sweeps were run back to back with llama3.1:8b at temperature 0 and the M3
+thresholds: `squad2-v5-v1` (whole-passage premise) and `squad2-v5` (windows,
+v2). Gate A and generator self-refusal counts came out identical in both
+(48 and 30), so Gate B is the only thing that differs.
+
+| Guarded, n = 150 | M3 (v1, Sep) | Fresh v1 | **Fresh v2** |
+|---|---|---|---|
+| Answerable answered | 21 | 22 | **37** |
+| …of which correct | 20 (95%) | 21 (95%) | **36 (97%)** |
+| Over-abstention | 72.0% | 70.7% | **50.7%** (CI 40–62%) |
+| Hallucination (unanswerable answered) | 8 (10.7%) | 9 (12.0%) | **11 (14.7%)** (CI 8–24%) |
+| Gate B suppressions that were correct | 35 / 36 | 35 / 35 | 20 / 20 |
+
+Paired v1 → v2 on the same items:
+- **Answerable:** 17 newly answered, 2 lost. Exact McNemar **p = 0.0007**, so
+  the coverage gain is real.
+- **Unanswerable:** 2 newly hallucinated, 0 fixed. **p = 0.5**, so not
+  significant, but it is a cost and should be stated as one.
+- The offline prediction (37 answered, 35 correct, 10 hallucinations) matched
+  the fresh run closely, which supports the re-scoring method.
+- Fresh v1 reproduces M3 within 1–2 items, so the September results are
+  stable.
+
+**The trade, in one line:** v2 answers 15 more questions correctly for 2 more
+hallucinations out of 75. Gate B still rejects only correct answers on the
+answerable side (20 of 20), so there is room left. The next lever is a
+stronger NLI model, not threshold tuning.
 
 **The viva sentence:** "The over-abstention was not the price of safety. Most
 of it was a premise-length problem in the NLI gate. Scoring claims against
 short sentence windows instead of whole paragraphs raised Gate B's ability to
-separate right from wrong answers from 0.56 to 0.67 AUROC, and cut
-over-abstention from 72% to 51% at the same threshold, with no meaningful rise
-in hallucinations."
+separate right from wrong answers from 0.56 to 0.67 AUROC. In a fresh
+end-to-end run at the same threshold it cut over-abstention from 71% to 51%,
+a significant gain, for two extra hallucinations out of 75."
 
 ---
 
@@ -375,9 +401,9 @@ in hallucinations."
 2. **The cost is coverage:** it answered only 21 of 75 answerable questions.
    The main cause is **Gate B rejecting correct answers** (35 of 36 of its
    suppressions were correct). **Gate B v2** (scoring against 3-sentence
-   windows) re-scores the same answers to 37 answered (35 correct), cutting
-   over-abstention from 72% to 51%, with hallucinations 8 → 10 (not a
-   significant change).
+   windows), confirmed in a fresh end-to-end run, answers 37 (36 correct),
+   cutting over-abstention from 71% to 51% (paired p = 0.0007).
+   Hallucinations go from 9 to 11 of 75 (p = 0.5).
 3. **As a hallucination *detector*** (ranking the baseline's answers), the
    reranker (Gate A) carries the most signal (AUROC 0.63). The NLI gate is
    near chance on SQuAD 2.0, because SQuAD's "hallucinations" are about the
@@ -474,8 +500,8 @@ At that operating point it was too conservative, and I found out why: 35 of
 the 36 answers Gate B suppressed were correct. The NLI model was being handed
 whole 100–350-word paragraphs as premises and went neutral even on sentences
 the paragraph stated outright. Gate B v2 scores each claim against short
-3-sentence windows. On the same answers, over-abstention falls from 72% to 51%
-with no significant rise in hallucinations. When the system answers, it is
+3-sentence windows. In a fresh run it cut over-abstention from 71% to 51%
+(paired p = 0.0007), for 2 extra hallucinations out of 75 (not significant). When the system answers, it is
 right about 95% of the time.
 
 **Q: How much of the improvement comes from the prompt rather than the gates?**
@@ -519,9 +545,10 @@ gold standard. Neither scorer validates the other.
 
 1. **Rewrite the M5 report's results section** with the corrected story
    (section 3) and the wording fixes above. *Highest value, no compute.*
-2. ~~Gate B v2~~ **Done** (section 2b). Remaining: one fresh guarded SQuAD run
-   with v2 to confirm end to end (`python scripts/run_benchmark.py --tag
-   squad2-v5 --arm guarded`, then `eval_benchmark.py --tag squad2-v5`).
+2. ~~Gate B v2~~ **Done and confirmed end to end** (section 2b). A natural
+   next step is a stronger NLI model (e.g. a DeBERTa-large NLI checkpoint),
+   since every remaining Gate B rejection of an answerable answer is still a
+   correct answer.
 3. **Third arm: the guarded prompt with no gates.** Separates the prompt's
    contribution from the gates'. About 10–15 minutes of Ollama time.
 4. **Larger n** (e.g. 500 items) for tighter confidence intervals, if time

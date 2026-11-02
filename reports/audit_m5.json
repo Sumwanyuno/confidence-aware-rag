@@ -265,6 +265,146 @@
         "0.35": 4,
         "0.45": 185
       }
+    },
+    "m5_gate_b_v1": {
+      "guarded": {
+        "n": 150,
+        "hallucination": {
+          "k": 9,
+          "n": 75,
+          "rate": 0.12,
+          "ci95": [
+            0.0644,
+            0.2126
+          ]
+        },
+        "over_abstention": {
+          "k": 53,
+          "n": 75,
+          "rate": 0.7067,
+          "ci95": [
+            0.5956,
+            0.7976
+          ]
+        },
+        "em_all_as_reported": 0.44,
+        "em_all_corrected": 0.4533,
+        "f1_all_corrected": 0.5003,
+        "em_answerable_as_reported": 0.0,
+        "em_answerable_corrected": 0.0267,
+        "contains_gold_answerable": {
+          "k": 21,
+          "n": 75,
+          "rate": 0.28,
+          "ci95": [
+            0.191,
+            0.3904
+          ]
+        },
+        "selective_accuracy_answered": {
+          "k": 21,
+          "n": 22,
+          "rate": 0.9545,
+          "ci95": [
+            0.782,
+            0.9919
+          ]
+        }
+      },
+      "guarded_abstention_sources": {
+        "answerable": {
+          "n": 75,
+          "gate_a": 15,
+          "generator_self_refusal": 3,
+          "gate_b": 35,
+          "answered": 22,
+          "gate_b_suppressed_but_correct": 35,
+          "gate_b_suppressed_with_contradiction": 16
+        },
+        "unanswerable": {
+          "n": 75,
+          "gate_a": 33,
+          "generator_self_refusal": 27,
+          "gate_b": 6,
+          "answered": 9
+        }
+      }
+    },
+    "m5_gate_b_v2": {
+      "guarded": {
+        "n": 150,
+        "hallucination": {
+          "k": 11,
+          "n": 75,
+          "rate": 0.1467,
+          "ci95": [
+            0.0839,
+            0.2438
+          ]
+        },
+        "over_abstention": {
+          "k": 38,
+          "n": 75,
+          "rate": 0.5067,
+          "ci95": [
+            0.396,
+            0.6167
+          ]
+        },
+        "em_all_as_reported": 0.4267,
+        "em_all_corrected": 0.4467,
+        "f1_all_corrected": 0.5434,
+        "em_answerable_as_reported": 0.0,
+        "em_answerable_corrected": 0.04,
+        "contains_gold_answerable": {
+          "k": 36,
+          "n": 75,
+          "rate": 0.48,
+          "ci95": [
+            0.3707,
+            0.5913
+          ]
+        },
+        "selective_accuracy_answered": {
+          "k": 36,
+          "n": 37,
+          "rate": 0.973,
+          "ci95": [
+            0.8618,
+            0.9952
+          ]
+        }
+      },
+      "guarded_abstention_sources": {
+        "answerable": {
+          "n": 75,
+          "gate_a": 15,
+          "generator_self_refusal": 3,
+          "gate_b": 20,
+          "answered": 37,
+          "gate_b_suppressed_but_correct": 20,
+          "gate_b_suppressed_with_contradiction": 15
+        },
+        "unanswerable": {
+          "n": 75,
+          "gate_a": 33,
+          "generator_self_refusal": 27,
+          "gate_b": 4,
+          "answered": 11
+        }
+      }
+    },
+    "m5_gate_b_v1_to_v2": {
+      "unanswerable_answered": {
+        "only_before": 0,
+        "only_after": 2,
+        "mcnemar_exact_p": 0.5
+      },
+      "answerable_answered": {
+        "only_before": 2,
+        "only_after": 17,
+        "mcnemar_exact_p": 0.0007
+      }
     }
   },
   "hotpot": {
