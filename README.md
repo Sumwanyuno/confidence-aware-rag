@@ -162,7 +162,7 @@ local generation end to end, the SQuAD 2.0 harness and the baseline control
 arm (M2); threshold calibration, risk–coverage analysis and the
 NLI-vs-LLM-judge agreement study (M3); HotpotQA multi-hop evaluation,
 chunk-vs-sentence granularity ablation, and the Gate B architectural
-diagnosis (M4). Milestone 5's final report is `reports/Milestone5_Report.docx`.
+diagnosis (M4). The submitted milestone reports are in `reports/Submitted/`; the generator scripts write drafts to `reports/`.
 
 ### Milestone 1 (27 Aug 2026)
 

@@ -296,99 +296,84 @@ Gate B scores differ under the final scorer."
 
 ## 2b. Gate B v2: the M5 improvement
 
-**Script:** `scripts/gate_b_v2_experiment.py` → `reports/gate_b_v2.json`.
-No LLM is called. The answers generated in M3/M4 are held fixed and only
-Gate B is re-run, through the production `ConfidenceEvaluator.gate_b` path.
-v1 reproduces the stored scores exactly on the M3 guarded run (72/72) and on
-HotpotQA (300/300). On the M2 baseline rows, 14 differ because of H12b.
+**Final design:** each claim is scored against every retrieved passage
+**and** against overlapping 3-sentence windows of it, and the best-supporting
+premise wins (`nli_premise="both"`, the default in `src/config.py`).
+`RAG_NLI_PREMISE=passage` restores v1.
 
-**What was tried.** Two independent changes to what NLI is shown:
+**Scripts:** `scripts/gate_b_v2_experiment.py` re-scores stored answers, so no
+LLM is needed (`reports/gate_b_v2.json` has all variants;
+`gate_b_v2_final_squad.json` and `gate_b_v2_final_hotpot.json` have v1 vs the
+final v2). v1 reproduces the stored scores exactly on the M3 guarded run
+(72/72) and on HotpotQA (150/150). On the M2 baseline rows, 14 differ because
+of H12b.
 
-| Config | Hypothesis | Premise |
-|---|---|---|
-| v1 (M1–M4) | answer sentence | whole passage |
-| qa_short | question + answer, for ≤ 8-word claims | whole passage |
-| qa | question + every claim | whole passage |
-| **window (v2)** | answer sentence | **overlapping 3-sentence windows** |
-| qa_short+window | both | windows |
+**How it got here**
+1. *Question-conditioning* (adding the question to the NLI hypothesis) barely
+   helped SQuAD (over-abstention 72% → 69%) and hurt HotpotQA (62.5% → 87.5% of
+   correct answers rejected). Rejected.
+2. *Windows only* helped SQuAD a lot (AUROC 0.56 → 0.67). But the smoke test
+   showed it rejecting a correct claim over a numbered list in the course notes
+   (0.998 under v1, 0.004 with windows), because no 3-sentence window holds the
+   whole list. Rejected.
+3. *Passages + windows* keeps both kinds of premise. It fixes the list case
+   (back to 0.998) and keeps most of the SQuAD gain. Adopted as v2. The smoke
+   test was also tightened: its old check (score > 0) let the windows-only
+   regression pass.
 
-**SQuAD 2.0, M3 answers (threshold 0.25 left unchanged, no refit):**
+**Offline comparison (stored answers, threshold 0.25 unchanged):**
 
-| | v1 | qa_short | **window** | qa_short+window |
+| | v1 | windows only | qa_short+window | **v2 (passages + windows)** |
 |---|---|---|---|---|
-| Gate B AUROC, correct vs wrong (baseline arm) | 0.56 | 0.57 | **0.67** | 0.70 |
-| Correct answers Gate B rejects | 65% | 60% | **43%** | 35% |
-| Guarded: answerable answered (correct) | 21 (20) | 23 (22) | **37 (35)** | 41 (39) |
-| Guarded: over-abstention | 72% | 69% | **51%** | 45% |
-| Guarded: hallucinations / 75 | 8 | 9 | **10** | 9 |
+| SQuAD Gate B AUROC, correct vs wrong | 0.56 | 0.67 | 0.70 | **0.65** |
+| SQuAD correct answers Gate B rejects | 65% | 43% | 35% | **41%** |
+| HotpotQA (chunk) Gate B AUROC | 0.57 | 0.58 | 0.49 | **0.58** |
+| HotpotQA correct answers rejected | 65% | 54% | 74% | **53%** |
 
-**HotpotQA baseline answers (does it generalise?):**
+**End-to-end confirmation (fresh runs, 2 Nov).** Fresh guarded SQuAD sweeps
+used llama3.1:8b at temperature 0 and the M3 thresholds. Gate A and generator
+self-refusal counts came out identical in all of them (48 and 30), so Gate B
+is the only thing that differs.
 
-| Chunk granularity | v1 | qa_short | **window** | qa_short+window |
+| Guarded, n = 150 | M3 (v1, Sep) | Fresh v1 | Fresh windows only | **Fresh v2** |
 |---|---|---|---|---|
-| Gate B AUROC | 0.57 | 0.53 | **0.58** | 0.49 |
-| Correct answers rejected | 65% | 76% | **54%** | 74% |
+| Answerable answered | 21 | 22 | 37 | **39** |
+| …of which correct | 20 | 21 | 36 | **38 (97%)** |
+| Over-abstention | 72.0% | 70.7% | 50.7% | **48.0%** (CI 37–59%) |
+| Hallucination (unanswerable answered) | 8 | 9 | 11 | **11 (14.7%)** (CI 8–24%) |
+| Gate B suppressions (answerable) that were correct | 35/36 | 35/35 | 20/20 | **18/18** |
+| Median Gate B latency | | ≈ 94 ms | ≈ 196 ms* | **≈ 400 ms** |
 
-(Sentence granularity: windows change nothing, because each unit is already
-one sentence. Question-conditioning makes it worse: 62.5% → 87.5% of correct
-answers rejected.)
+*Measured in an earlier session; the 94 vs 400 ms pair was measured back to back.
 
-**Decision: v2 = window premise, bare-claim hypothesis.** It is the only
-change that helps on *both* datasets. Question-conditioning is the best single
-SQuAD number but hurts HotpotQA, so adopting it would be fitting to one
-benchmark. v2 is now the default (`nli_premise="window"` in
-`src/config.py`); `RAG_NLI_PREMISE=passage` restores v1.
-
-**Honest caveats, to state in the report:**
-- **Selection.** Six configurations were compared on the same 150 items, so
-  picking the best one carries some optimism. The v2 choice was the most
-  conservative of the improving options (it adds no question text, and it
-  helped the second dataset too), and the threshold was *not* refit.
-- **Cross-fitted threshold.** Choosing the threshold on one half and testing
-  on the other gives 32 answered (30 correct) and 7 hallucinations, still far
-  better than v1's 18 (17) and 8. The fitted thresholds jump between folds
-  (0.55 and 0.80), so keep 0.25 and say the threshold is not yet stable.
-- **Hallucinations: 8 → 10 is not a real change** (2 items; Wilson intervals
-  overlap almost entirely). More correct answers got through without letting
-  in meaningfully more wrong ones.
-- **Cost.** Gate B median 119 ms → 196 ms (more premise pairs). Still
-  negligible next to ~3 s of generation.
-
-**End-to-end confirmation (fresh runs, 2 Nov).** Two fresh guarded SQuAD
-sweeps were run back to back with llama3.1:8b at temperature 0 and the M3
-thresholds: `squad2-v5-v1` (whole-passage premise) and `squad2-v5` (windows,
-v2). Gate A and generator self-refusal counts came out identical in both
-(48 and 30), so Gate B is the only thing that differs.
-
-| Guarded, n = 150 | M3 (v1, Sep) | Fresh v1 | **Fresh v2** |
-|---|---|---|---|
-| Answerable answered | 21 | 22 | **37** |
-| …of which correct | 20 (95%) | 21 (95%) | **36 (97%)** |
-| Over-abstention | 72.0% | 70.7% | **50.7%** (CI 40–62%) |
-| Hallucination (unanswerable answered) | 8 (10.7%) | 9 (12.0%) | **11 (14.7%)** (CI 8–24%) |
-| Gate B suppressions that were correct | 35 / 36 | 35 / 35 | 20 / 20 |
-
-Paired v1 → v2 on the same items:
-- **Answerable:** 17 newly answered, 2 lost. Exact McNemar **p = 0.0007**, so
-  the coverage gain is real.
+Paired fresh v1 → fresh v2 on the same items:
+- **Answerable:** 17 newly answered, 0 lost. Exact McNemar **p < 0.001**.
 - **Unanswerable:** 2 newly hallucinated, 0 fixed. **p = 0.5**, so not
   significant, but it is a cost and should be stated as one.
-- The offline prediction (37 answered, 35 correct, 10 hallucinations) matched
-  the fresh run closely, which supports the re-scoring method.
 - Fresh v1 reproduces M3 within 1–2 items, so the September results are
   stable.
 
-**The trade, in one line:** v2 answers 15 more questions correctly for 2 more
-hallucinations out of 75. Gate B still rejects only correct answers on the
-answerable side (20 of 20), so there is room left. The next lever is a
-stronger NLI model, not threshold tuning.
+**Honest caveats, to state in the report:**
+- **Selection.** Several configurations were compared on the same 150 items,
+  so the chosen one carries some optimism. The threshold was *not* refit, and
+  the choice was driven by generalisation (HotpotQA) and a real failure case,
+  not by the best SQuAD number.
+- **Threshold stability.** Cross-fitted thresholds jumped between folds
+  (0.55 and 0.80 for windows), so 0.25 is kept and the threshold is not yet
+  stable.
+- **Cost.** About 4× slower Gate B (more premise pairs). Still small next to
+  ~3 s of generation.
+
+**The trade, in one line:** v2 answers 17 more questions correctly for 2 more
+hallucinations out of 75. All 18 answerable answers Gate B still rejects are
+correct, so the next lever is a stronger NLI model, not threshold tuning.
 
 **The viva sentence:** "The over-abstention was not the price of safety. Most
-of it was a premise-length problem in the NLI gate. Scoring claims against
-short sentence windows instead of whole paragraphs raised Gate B's ability to
-separate right from wrong answers from 0.56 to 0.67 AUROC. In a fresh
-end-to-end run at the same threshold it cut over-abstention from 71% to 51%,
-a significant gain, for two extra hallucinations out of 75."
+of it was a premise-length problem in the NLI gate. Checking each claim
+against short sentence windows as well as the whole passage raised Gate B's
+ability to separate right from wrong answers from 0.56 to 0.65 AUROC. In a
+fresh end-to-end run at the same threshold it cut over-abstention from 71% to
+48%, a significant gain, for two extra hallucinations out of 75."
 
 ---
 
@@ -401,9 +386,9 @@ a significant gain, for two extra hallucinations out of 75."
 2. **The cost is coverage:** it answered only 21 of 75 answerable questions.
    The main cause is **Gate B rejecting correct answers** (35 of 36 of its
    suppressions were correct). **Gate B v2** (scoring against 3-sentence
-   windows), confirmed in a fresh end-to-end run, answers 37 (36 correct),
-   cutting over-abstention from 71% to 51% (paired p = 0.0007).
-   Hallucinations go from 9 to 11 of 75 (p = 0.5).
+   windows as well as whole passages), confirmed in a fresh end-to-end run,
+   answers 39 (38 correct), cutting over-abstention from 71% to 48% (paired
+   p < 0.001). Hallucinations go from 9 to 11 of 75 (p = 0.5).
 3. **As a hallucination *detector*** (ranking the baseline's answers), the
    reranker (Gate A) carries the most signal (AUROC 0.63). The NLI gate is
    near chance on SQuAD 2.0, because SQuAD's "hallucinations" are about the
@@ -429,9 +414,12 @@ every number survives an examiner recomputing it.
 | `tests/` | 11 new tests (86 total, all passing) |
 | `scripts/audit_results.py` | New: re-scores all saved runs, writes `reports/audit_m5.json` |
 | `scripts/run_generation_hotpot.py` | Scores the *shown* answer; separates Gate B failure from contradiction; containment-based hallucination; records self-refusal |
-| `src/scorers.py`, `src/config.py`, `src/confidence.py` | Gate B v2: `premise_windows()` (default), optional `build_hypothesis()` question-conditioning |
+| `src/scorers.py`, `src/config.py`, `src/confidence.py` | Gate B v2: passages + `premise_windows()` (default `nli_premise="both"`), optional `build_hypothesis()` question-conditioning |
 | `scripts/gate_b_v2_experiment.py` | New: offline v1-vs-v2 comparison, writes `reports/gate_b_v2.json` |
 | `tests/test_gate_b_v2.py` | 6 tests for the v2 input construction (92 total) |
+| `scripts/smoke_test.py` | Gate B checks now fail when a grounded answer does not pass |
+| `reports/Submitted/` | The five milestone reports exactly as submitted |
+| `reports/Milestone5_Report_revised.docx` | Revised M5 with corrected results and Gate B v2 (built from the submitted M5's formatting) |
 | (previously uncommitted) | HotpotQA scripts, M5 report generator, pending README/calibration edits |
 
 The old JSON result files (`benchmark_m2/m3.json`, `generation_hotpot_m4.json`,
@@ -499,9 +487,10 @@ Different questions need different models.
 At that operating point it was too conservative, and I found out why: 35 of
 the 36 answers Gate B suppressed were correct. The NLI model was being handed
 whole 100–350-word paragraphs as premises and went neutral even on sentences
-the paragraph stated outright. Gate B v2 scores each claim against short
-3-sentence windows. In a fresh run it cut over-abstention from 71% to 51%
-(paired p = 0.0007), for 2 extra hallucinations out of 75 (not significant). When the system answers, it is
+the paragraph stated outright. Gate B v2 also scores each claim against
+short 3-sentence windows. In a fresh run it cut over-abstention from 71% to
+48% (paired p < 0.001), for 2 extra hallucinations out of 75 (not
+significant). When the system answers, it is
 right about 95% of the time.
 
 **Q: How much of the improvement comes from the prompt rather than the gates?**

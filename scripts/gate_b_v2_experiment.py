@@ -284,6 +284,7 @@ def main() -> int:
     ap.add_argument("--hotpot-bench", type=Path, default=BENCH_DIR / "hotpot_dev_150.jsonl")
     ap.add_argument("--hotpot-rows", type=Path, default=REPORTS_DIR / "generation_hotpot_m4_rows.jsonl")
     ap.add_argument("--skip-hotpot", action="store_true")
+    ap.add_argument("--skip-squad", action="store_true")
     ap.add_argument("--configs", help="comma-separated subset of configurations, e.g. v1,both")
     ap.add_argument("--hotpot-granularity", choices=("sentence", "chunk"))
     ap.add_argument("--out", type=Path, default=REPORTS_DIR / "gate_b_v2.json")
@@ -298,7 +299,7 @@ def main() -> int:
             raise SystemExit(f"unknown configs: {sorted(unknown)}")
     if args.hotpot_granularity:
         GRANULARITIES = (args.hotpot_granularity,)
-    report = {"squad": squad(args.bench)}
+    report = {} if args.skip_squad else {"squad": squad(args.bench)}
     if not args.skip_hotpot:
         report["hotpot"] = hotpot(args.hotpot_bench, args.hotpot_rows)
 
