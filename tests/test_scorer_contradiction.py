@@ -32,7 +32,7 @@ class _StubNLI(NLIScorer):
         ]
 
         class _M:  # noqa: N806 - keeps the shape of the real predict() call
-            def predict(_self, pairs, show_progress_bar=False):  # noqa: N805
+            def predict(_self, pairs, show_progress_bar=False, batch_size=32):  # noqa: N805
                 # score_claims builds pairs as (ctx, claim) per claim per ctx;
                 # one claim only here, so return one row per context.
                 return [list(r) for r in table]

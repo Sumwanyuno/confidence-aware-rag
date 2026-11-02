@@ -264,7 +264,8 @@ class NLIScorer:
                     premises.append(w)
                     origin.append(o)
         pairs = [(p, hyp) for hyp in hyps for p in premises]
-        probs = self._softmax_rows(model.predict(pairs, show_progress_bar=False))
+        probs = self._softmax_rows(model.predict(
+            pairs, show_progress_bar=False, batch_size=settings.confidence.nli_batch_size))
 
         order = self._label_order or ["contradiction", "entailment", "neutral"]
         idx = {name: i for i, name in enumerate(order)}

@@ -537,7 +537,15 @@ gold standard. Neither scorer validates the other.
 
 1. **Rewrite the M5 report's results section** with the corrected story
    (section 3) and the wording fixes above. *Highest value, no compute.*
-2. ~~Gate B v2~~ **Done and confirmed end to end** (section 2b). A natural
+2. ~~Gate B v2~~ **Done and confirmed end to end** (section 2b).
+   **Larger NLI model, tested offline** (`reports/gate_b_large_{squad,hotpot}.json`):
+   with `nli-deberta-v3-large` and the v2 premises, SQuAD Gate B AUROC rose
+   from 0.65 to 0.70, wrongly rejected correct answers fell from 41% to 10%,
+   and the guarded arm would answer 47 answerable questions (45 correct)
+   instead of 39 (37), with 12 hallucinations instead of 10. On HotpotQA it
+   was more lenient but not sharper (AUROC 0.57 vs 0.58). It needs batch size
+   4 to fit beside llama3.1 on 8 GB. Not adopted as the default; set
+   `RAG_NLI_MODEL` to its folder to use it. A natural
    next step is a stronger NLI model (e.g. a DeBERTa-large NLI checkpoint),
    since every remaining Gate B rejection of an answerable answer is still a
    correct answer.

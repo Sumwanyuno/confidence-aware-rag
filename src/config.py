@@ -139,6 +139,9 @@ class ConfidenceConfig:
     # no single window holds the whole list. Evidence: reports/gate_b_v2.json.
     # Set RAG_NLI_PREMISE=passage to reproduce Milestones 1-4.
     nli_premise: str = os.getenv("RAG_NLI_PREMISE", "both")
+    # Premise-hypothesis pairs scored per forward pass. Lower it for a large
+    # NLI model on an 8 GB GPU (paragraph premises run out of memory at 32).
+    nli_batch_size: int = int(os.getenv("RAG_NLI_BATCH_SIZE", "32"))
     # Gate A backend: a relevance reranker, NOT an NLI model. Before generation
     # there is no hypothesis to entail, so the question is "does this passage
     # answer this query", which is a ranking task.
