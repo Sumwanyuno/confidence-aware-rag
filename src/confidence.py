@@ -227,7 +227,7 @@ class ConfidenceEvaluator:
 
         nli_score, claims = 0.0, []
         if self._use_nli():
-            nli_score, claims = get_nli_scorer().faithfulness(answer, contexts)
+            nli_score, claims = get_nli_scorer().faithfulness(answer, contexts, question=query)
 
         llm_faith, llm_reason = None, ""
         if self._use_llm():

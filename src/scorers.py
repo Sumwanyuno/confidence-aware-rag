@@ -48,6 +48,66 @@ def split_claims(answer: str, *, min_chars: int = 12) -> list[str]:
     return claims or ([text] if text else [])
 
 
+_CITATION = re.compile(r"\[\s*\d+(?:\s*,\s*\d+)*\s*\]")
+
+# A claim this short is almost always a bare answer ("New Orleans",
+# "August 15, 1971") rather than a statement. Eight words is a heuristic, not
+# a fit: it covers noun-phrase answers and keeps ordinary sentences untouched.
+SHORT_CLAIM_WORDS = 8
+
+
+def build_hypothesis(claim: str, question: str | None, mode: str) -> str:
+    """The text NLI actually tests against each passage.
+
+    ``claim`` (Gate B v1) tests the answer sentence alone. That fails on short
+    answers: NLI decides whether a premise entails a *statement*, and
+    "New Orleans [1]" is not one, so it scores ~0 even when the passage names
+    New Orleans as the answer. On the M3 SQuAD run this suppressed 35 correct
+    answers out of 36 Gate B rejections on answerable questions.
+
+    ``qa`` prefixes the question to every claim, so the hypothesis reads as
+    "Where was the game played? New Orleans" - something a passage can entail.
+    It also puts the question's premise into the hypothesis, which lets NLI
+    notice an answer that is in the passage but answers a different question.
+    ``qa_short`` does that only for short claims and leaves full sentences as
+    they were, the least invasive version.
+
+    The v2 modes also drop citation markers: "[1]" is formatting the generator
+    was asked for, not something the passage should have to entail. ``claim``
+    is left byte-for-byte as v1 so the saved Milestone 2-4 scores reproduce.
+    """
+    if mode == "claim" or not question:
+        return claim
+    text = " ".join(_CITATION.sub(" ", claim).split())
+    if mode == "qa_short" and len(text.split()) > SHORT_CLAIM_WORDS:
+        return text
+    return f"{question.strip()} {text}"
+
+
+_PASSAGE_SENTENCE = re.compile(r"(?<=[.!?])\s+")
+WINDOW_SENTENCES = 3
+
+
+def premise_windows(contexts: list[str], size: int = WINDOW_SENTENCES) -> list[tuple[str, int]]:
+    """Overlapping sentence windows of each passage, tagged with their passage.
+
+    A whole SQuAD paragraph is 100-350 words. nli-deberta-v3-base, trained on
+    one- or two-sentence premises, goes neutral on most claims at that length
+    even when one sentence states them outright. Windows of a few consecutive
+    sentences (stride 1) keep the premise short while leaving room for "The
+    park ..." to find "Woodward Park" a sentence earlier - the SummaC
+    approach. Passages no longer than one window are used whole.
+    """
+    out: list[tuple[str, int]] = []
+    for i, ctx in enumerate(contexts):
+        sents = [s for s in _PASSAGE_SENTENCE.split(" ".join(ctx.split())) if s]
+        if len(sents) <= size:
+            out.append((ctx, i))
+            continue
+        out.extend((" ".join(sents[j : j + size]), i) for j in range(len(sents) - size + 1))
+    return out
+
+
 def _device() -> str:
     requested = settings.confidence.nli_device
     if requested == "cpu":
@@ -146,7 +206,15 @@ class NLIScorer:
         return exp / exp.sum(axis=1, keepdims=True)
 
 
-    def score_claims(self, claims: list[str], contexts: list[str]) -> list[ClaimScore]:
+    def score_claims(
+        self,
+        claims: list[str],
+        contexts: list[str],
+        *,
+        question: str | None = None,
+        mode: str | None = None,
+        premise: str | None = None,
+    ) -> list[ClaimScore]:
         """Score every claim against every context, keeping the best support.
 
         Taking the max over contexts (rather than concatenating them into one
@@ -173,14 +241,23 @@ class NLIScorer:
             return []
 
         model = self._ensure()
-        pairs = [(ctx, claim) for claim in claims for ctx in contexts]
+        mode = mode or settings.confidence.nli_hypothesis
+        premise = premise or settings.confidence.nli_premise
+        # The UI shows the original claim; only the NLI input is rewritten.
+        hyps = [build_hypothesis(c, question, mode) for c in claims]
+        if premise == "window":
+            windows = premise_windows(contexts)
+            premises, origin = [w for w, _ in windows], [o for _, o in windows]
+        else:
+            premises, origin = list(contexts), list(range(len(contexts)))
+        pairs = [(p, hyp) for hyp in hyps for p in premises]
         probs = self._softmax_rows(model.predict(pairs, show_progress_bar=False))
 
         order = self._label_order or ["contradiction", "entailment", "neutral"]
         idx = {name: i for i, name in enumerate(order)}
         e_i, n_i, c_i = idx.get("entailment", 1), idx.get("neutral", 2), idx.get("contradiction", 0)
 
-        n_ctx = len(contexts)
+        n_ctx = len(premises)
         out: list[ClaimScore] = []
         for ci, claim in enumerate(claims):
             rows = probs[ci * n_ctx : (ci + 1) * n_ctx]
@@ -197,12 +274,20 @@ class NLIScorer:
                     entailment=float(rows[best][e_i]),
                     neutral=float(rows[best][n_i]),
                     contradiction=contra,
-                    best_context_index=best,
+                    best_context_index=origin[best],
                 )
             )
         return out
 
-    def faithfulness(self, answer: str, contexts: list[str]) -> tuple[float, list[ClaimScore]]:
+    def faithfulness(
+        self,
+        answer: str,
+        contexts: list[str],
+        *,
+        question: str | None = None,
+        mode: str | None = None,
+        premise: str | None = None,
+    ) -> tuple[float, list[ClaimScore]]:
         """Mean entailment probability over the answer's claims.
 
         Not the *fraction* of claims that clear ``support_threshold``: a mean of
@@ -212,7 +297,7 @@ class NLIScorer:
         still use the threshold; only this aggregate ignores it.
         """
         claims = split_claims(answer)
-        scores = self.score_claims(claims, contexts)
+        scores = self.score_claims(claims, contexts, question=question, mode=mode, premise=premise)
         if not scores:
             return 0.0, []
         return sum(s.entailment for s in scores) / len(scores), scores

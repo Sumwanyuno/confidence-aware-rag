@@ -4,9 +4,10 @@
 milestone reports against the code and the saved results. 2 November 2026.*
 
 Every number below comes from the saved results (`data/runs.sqlite3`,
-`reports/*.json`, `reports/generation_hotpot_m4_rows.jsonl`). Nothing was
-regenerated. To reproduce: `python scripts/audit_results.py`, which writes
-`reports/audit_m5.json`.
+`reports/*.json`, `reports/generation_hotpot_m4_rows.jsonl`). No answer was
+regenerated. To reproduce: `python scripts/audit_results.py` (writes
+`reports/audit_m5.json`) and `python scripts/gate_b_v2_experiment.py` (writes
+`reports/gate_b_v2.json`, needs the cached NLI and embedding models, no LLM).
 
 ---
 
@@ -19,11 +20,11 @@ reports say.
 
 | Milestone | Built and working | Evidence holds up? |
 |---|---|---|
-| M1 Architecture | Ingestion, retrieval, both gates, composite, telemetry, Streamlit app, dashboard | Yes. Tests pass (now 86). |
+| M1 Architecture | Ingestion, retrieval, both gates, composite, telemetry, Streamlit app, dashboard | Yes. Tests pass (now 92). |
 | M2 Harness + baseline | SQuAD 2.0 harness, two arms, per-item throwaway index | Counts are right. "Identical configurations" is wrong (see H3). |
 | M3 Calibration | Thresholds, risk–coverage, judge study | Thresholds are right. EM headline and AURC reading are not (H1, H4, H5). |
 | M4 HotpotQA | Retrieval ablation, generation sweep | Retrieval numbers are right. Generation metrics are mis-scored (H6–H9). |
-| M5 Consolidation | Tests 75→86 pass, ruff clean, README | Repeats M3/M4 errors. The M4/M5 scripts were never committed (fixed on this branch). |
+| M5 Consolidation | Tests 75→92 pass, ruff clean, README | Repeats M3/M4 errors. The M4/M5 scripts were never committed (fixed on this branch). |
 
 ---
 
@@ -77,9 +78,12 @@ scores sit near zero.
 hypothesis is the bare answer, and short answers are not propositions. In M3,
 35 of the 36 answers Gate B suppressed were correct."
 
-**The fix (future work, or M5 if there is time):** build the hypothesis from
-the question and the answer together, e.g. "Q: When did the war occur? A: 1894"
-or a declarative rewrite. This is the standard QA-to-claim conversion.
+**Update: this diagnosis was only partly right.** The Gate B v2 experiment
+(section 2b) found that adding the question to the hypothesis barely helps
+(over-abstention 72% → 69%). The bigger cause is the **premise**: a whole
+100–350-word paragraph is too long for nli-deberta-v3-base, which goes neutral
+even on sentences the paragraph states outright. Scoring against 3-sentence
+windows fixes most of it.
 
 ### H3 — The baseline is not an "identical configuration" (major)
 
@@ -146,20 +150,23 @@ ranks right answers above wrong ones:
 carries most of it. On SQuAD 2.0, Gate B is close to chance. See H10 for why
 that is expected.
 
-### H6 — M4's "contradiction rate" is really a Gate B failure rate (major)
+### H6 — M4's "contradiction rate" is really a Gate B failure rate (minor, mislabel only)
 
-`run_generation_hotpot.py` set `contradiction = gate_b.score < gate_b_threshold`.
-That flag is true for *any* Gate B failure, and most failures are low
-entailment ("baseless"), not contradictions. The contradiction veto clamps the
-score to exactly 0.15. Counting rows at exactly 0.15 gives a **lower bound of
-11–14%**, not 70–75%. M4 §4.2's "the contradiction head fires" is not
-supported by the data.
+`run_generation_hotpot.py` set `contradiction = gate_b.score < gate_b_threshold`,
+which is true for *any* Gate B failure, not only contradictions. The Gate B v2
+experiment re-ran NLI on the same answers (exact reproduction, 150/150) and
+measured the **true** contradiction rate, meaning answers with at least one
+claim labelled evident_conflict: **66% (sentence) and 59% (chunk)**, against
+the 75% / 71% reported. So M4's substance holds and only the label is wrong.
+*(An earlier version of this review gave an 11–14% lower bound and called the
+claim unsupported. The bound was valid but far from the true value, and that
+judgement was wrong.)*
 
-**Correct wording:** "Gate B failed 71–75% of baseline answers (mostly low
-entailment; the contradiction veto fired on at least 11–14%)."
+**Correct wording:** "Gate B failed 71–75% of baseline answers; 59–66% had at
+least one claim the NLI model labelled a contradiction."
 
 **Fixed in code:** the run script now records `gate_b_failed` and a true
-`contradiction` (any claim labelled evident_conflict) as separate fields.
+`contradiction` as separate fields.
 
 ### H7 — M4 says 70–75% of flags hit "mostly valid answers", but its own table says 89–91% are hallucinations (major)
 
@@ -251,6 +258,19 @@ range* (≥ 0.20, above the contradiction cap). Passing everything would score
 F1 = 0.667, higher than 0.481. On this proxy label, Gate B as a filter does
 worse than no filter. Say so; it agrees with H2.
 
+### H12b — Gate B was calibrated on stale scores (moderate)
+
+The static baseline rows (written 11 Sep) were scored *before* the
+contradiction-attribution fix (`score_claims`: "if a passage entails the
+claim, that passage owns the contradiction call"). Re-scoring them with the
+current code changes 14 of 150: all 14 were vetoed to 0.15 by a spurious
+contradiction from an unrelated passage, and now score 0.39–0.997. The guarded
+M3 run used the fixed rule, but the M3 Gate B **calibration** (fitted on
+baseline rows) used the stale scores. The calibrated threshold barely moves
+(0.25 sits at the constraint boundary anyway, see H12), but say so: "the
+baseline control rows predate the contradiction-attribution fix; 14 of 150
+Gate B scores differ under the final scorer."
+
 ### H13 — Smaller inconsistencies (minor)
 
 - **Composite threshold.** M3 says "0.33 = harmonic mean at corner". The code
@@ -274,6 +294,78 @@ worse than no filter. Say so; it agrees with H2.
 
 ---
 
+## 2b. Gate B v2: the M5 improvement
+
+**Script:** `scripts/gate_b_v2_experiment.py` → `reports/gate_b_v2.json`.
+No LLM is called. The answers generated in M3/M4 are held fixed and only
+Gate B is re-run, through the production `ConfidenceEvaluator.gate_b` path.
+v1 reproduces the stored scores exactly on the M3 guarded run (72/72) and on
+HotpotQA (300/300). On the M2 baseline rows, 14 differ because of H12b.
+
+**What was tried.** Two independent changes to what NLI is shown:
+
+| Config | Hypothesis | Premise |
+|---|---|---|
+| v1 (M1–M4) | answer sentence | whole passage |
+| qa_short | question + answer, for ≤ 8-word claims | whole passage |
+| qa | question + every claim | whole passage |
+| **window (v2)** | answer sentence | **overlapping 3-sentence windows** |
+| qa_short+window | both | windows |
+
+**SQuAD 2.0, M3 answers (threshold 0.25 left unchanged, no refit):**
+
+| | v1 | qa_short | **window** | qa_short+window |
+|---|---|---|---|---|
+| Gate B AUROC, correct vs wrong (baseline arm) | 0.56 | 0.57 | **0.67** | 0.70 |
+| Correct answers Gate B rejects | 65% | 60% | **43%** | 35% |
+| Guarded: answerable answered (correct) | 21 (20) | 23 (22) | **37 (35)** | 41 (39) |
+| Guarded: over-abstention | 72% | 69% | **51%** | 45% |
+| Guarded: hallucinations / 75 | 8 | 9 | **10** | 9 |
+
+**HotpotQA baseline answers (does it generalise?):**
+
+| Chunk granularity | v1 | qa_short | **window** | qa_short+window |
+|---|---|---|---|---|
+| Gate B AUROC | 0.57 | 0.53 | **0.58** | 0.49 |
+| Correct answers rejected | 65% | 76% | **54%** | 74% |
+
+(Sentence granularity: windows change nothing, because each unit is already
+one sentence. Question-conditioning makes it worse: 62.5% → 87.5% of correct
+answers rejected.)
+
+**Decision: v2 = window premise, bare-claim hypothesis.** It is the only
+change that helps on *both* datasets. Question-conditioning is the best single
+SQuAD number but hurts HotpotQA, so adopting it would be fitting to one
+benchmark. v2 is now the default (`nli_premise="window"` in
+`src/config.py`); `RAG_NLI_PREMISE=passage` restores v1.
+
+**Honest caveats, to state in the report:**
+- **Selection.** Six configurations were compared on the same 150 items, so
+  picking the best one carries some optimism. The v2 choice was the most
+  conservative of the improving options (it adds no question text, and it
+  helped the second dataset too), and the threshold was *not* refit.
+- **Cross-fitted threshold.** Choosing the threshold on one half and testing
+  on the other gives 32 answered (30 correct) and 7 hallucinations, still far
+  better than v1's 18 (17) and 8. The fitted thresholds jump between folds
+  (0.55 and 0.80), so keep 0.25 and say the threshold is not yet stable.
+- **Hallucinations: 8 → 10 is not a real change** (2 items; Wilson intervals
+  overlap almost entirely). More correct answers got through without letting
+  in meaningfully more wrong ones.
+- **Cost.** Gate B median 119 ms → 196 ms (more premise pairs). Still
+  negligible next to ~3 s of generation.
+- **Not yet end-to-end.** These are stored answers re-scored. A fresh guarded
+  run with v2 (about 5 minutes on Ollama) would confirm it; until then, call it
+  "offline re-scoring of the M3 answers".
+
+**The viva sentence:** "The over-abstention was not the price of safety. Most
+of it was a premise-length problem in the NLI gate. Scoring claims against
+short sentence windows instead of whole paragraphs raised Gate B's ability to
+separate right from wrong answers from 0.56 to 0.67 AUROC, and cut
+over-abstention from 72% to 51% at the same threshold, with no meaningful rise
+in hallucinations."
+
+---
+
 ## 3. Corrected headline story (use this in M5)
 
 1. **On single-hop questions (SQuAD 2.0)**, the guarded pipeline (abstention
@@ -281,9 +373,11 @@ worse than no filter. Say so; it agrees with H2.
    **75 of 75** for a plain RAG baseline. When it did answer an answerable
    question, it was right **95%** of the time (20/21).
 2. **The cost is coverage:** it answered only 21 of 75 answerable questions.
-   The main cause is **Gate B rejecting correct short answers** (35 of 36
-   suppressions were correct), because NLI cannot evaluate a bare noun phrase.
-   This is a fixable design flaw, not a law of nature.
+   The main cause is **Gate B rejecting correct answers** (35 of 36 of its
+   suppressions were correct). **Gate B v2** (scoring against 3-sentence
+   windows) re-scores the same answers to 37 answered (35 correct), cutting
+   over-abstention from 72% to 51%, with hallucinations 8 → 10 (not a
+   significant change).
 3. **As a hallucination *detector*** (ranking the baseline's answers), the
    reranker (Gate A) carries the most signal (AUROC 0.63). The NLI gate is
    near chance on SQuAD 2.0, because SQuAD's "hallucinations" are about the
@@ -309,6 +403,9 @@ every number survives an examiner recomputing it.
 | `tests/` | 11 new tests (86 total, all passing) |
 | `scripts/audit_results.py` | New: re-scores all saved runs, writes `reports/audit_m5.json` |
 | `scripts/run_generation_hotpot.py` | Scores the *shown* answer; separates Gate B failure from contradiction; containment-based hallucination; records self-refusal |
+| `src/scorers.py`, `src/config.py`, `src/confidence.py` | Gate B v2: `premise_windows()` (default), optional `build_hypothesis()` question-conditioning |
+| `scripts/gate_b_v2_experiment.py` | New: offline v1-vs-v2 comparison, writes `reports/gate_b_v2.json` |
+| `tests/test_gate_b_v2.py` | 6 tests for the v2 input construction (92 total) |
 | (previously uncommitted) | HotpotQA scripts, M5 report generator, pending README/calibration edits |
 
 The old JSON result files (`benchmark_m2/m3.json`, `generation_hotpot_m4.json`,
@@ -373,10 +470,13 @@ failure. A post-generation gate catches invention when retrieval was fine.
 Different questions need different models.
 
 **Q: Your guarded arm abstains 81% of the time. Isn't that useless?**
-At that operating point, yes, and I found out why: Gate B rejects correct
-short answers because a bare noun phrase is not an NLI hypothesis (35 of 36
-suppressions were correct). When the system does answer, it is right 95% of
-the time. The fix is to condition the hypothesis on the question.
+At that operating point it was too conservative, and I found out why: 35 of
+the 36 answers Gate B suppressed were correct. The NLI model was being handed
+whole 100–350-word paragraphs as premises and went neutral even on sentences
+the paragraph stated outright. Gate B v2 scores each claim against short
+3-sentence windows. On the same answers, over-abstention falls from 72% to 51%
+with no significant rise in hallucinations. When the system answers, it is
+right about 95% of the time.
 
 **Q: How much of the improvement comes from the prompt rather than the gates?**
 Of 67 refusals on unanswerable questions, 27 came from the generator's own
@@ -419,10 +519,9 @@ gold standard. Neither scorer validates the other.
 
 1. **Rewrite the M5 report's results section** with the corrected story
    (section 3) and the wording fixes above. *Highest value, no compute.*
-2. **Gate B v2: a question-conditioned hypothesis.** Score
-   `"{question} {answer}"` (or a declarative rewrite) instead of the bare
-   answer, then re-evaluate offline on the stored SQuAD answers. Expected to
-   recover most of the 35 wrongly suppressed answers. About an hour.
+2. ~~Gate B v2~~ **Done** (section 2b). Remaining: one fresh guarded SQuAD run
+   with v2 to confirm end to end (`python scripts/run_benchmark.py --tag
+   squad2-v5 --arm guarded`, then `eval_benchmark.py --tag squad2-v5`).
 3. **Third arm: the guarded prompt with no gates.** Separates the prompt's
    contribution from the gates'. About 10–15 minutes of Ollama time.
 4. **Larger n** (e.g. 500 items) for tighter confidence intervals, if time
