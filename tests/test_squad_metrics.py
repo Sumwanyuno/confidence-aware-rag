@@ -9,10 +9,12 @@ SQuAD 2.0 evaluation script.
 from __future__ import annotations
 
 from src.squad_metrics import (
+    contains_gold,
     exact_match_score,
     f1_score,
     is_abstention,
     normalize_answer,
+    strip_citations,
 )
 
 
@@ -91,3 +93,36 @@ class TestF1:
 
     def test_answerable_abstention_scores_zero(self):
         assert f1_score("not confident enough to answer this", ["Normandy"]) == 0.0
+
+
+class TestCitations:
+    """The guarded prompt makes the model cite passages; scoring must ignore that."""
+
+    def test_strip_citation_forms(self):
+        assert strip_citations("1894 [1].").split() == ["1894", "."]
+        assert "[" not in strip_citations("Gloria Trevi [1][2]")
+        assert "[" not in strip_citations("yes [1, 2]")
+
+    def test_cited_answer_is_exact_match(self):
+        # Before the fix this normalised to "1894 1" and scored 0.
+        assert exact_match_score("1894 [1].", ["1894"]) == 1.0
+        assert f1_score("John de Mol Jr. [1]", ["John de Mol Jr."]) == 1.0
+
+    def test_brackets_that_are_not_citations_survive(self):
+        assert normalize_answer(strip_citations("[a] note")) == "note"  # article dropped, text kept
+
+
+class TestContainsGold:
+    def test_sentence_answer_containing_gold(self):
+        assert contains_gold("The first Sino-Japanese War occurred in 1894 [1].", ["1894"])
+
+    def test_token_boundary_respected(self):
+        # "189" must not match inside "1894".
+        assert not contains_gold("It happened in 1894.", ["189"])
+
+    def test_unanswerable_follows_squad_convention(self):
+        assert contains_gold("INSUFFICIENT_CONTEXT", [])
+        assert not contains_gold("Normandy", [])
+
+    def test_abstention_on_answerable_is_wrong(self):
+        assert not contains_gold("", ["Normandy"])

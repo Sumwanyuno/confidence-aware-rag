@@ -17,10 +17,12 @@ Two arms per granularity:
 
 Metrics tracked:
 
-  EM / F1           - standard QA metrics, computed against the gold answer
+  EM / F1           - standard QA metrics on the answer the user was shown
+  accuracy_contains_gold - the gold answer appears in the shown answer
   hallucination_rate - answers that passed the gates but are wrong
-  over_abstention   - correct retrievals where Gate A refused to generate
-  gate_b_contradiction_rate - generated answers Gate B marked as contradicted
+  over_abstention   - abstentions where retrieval had surfaced a gold unit
+  gate_b_failure_rate - generated answers scoring under Gate B's threshold
+  gate_b_contradiction_rate - generated answers with a contradicted claim
   answer_rate       - fraction of items that produced an answer (not abstained)
 
 Every item gets a fresh isolated collection (same teardown discipline as the
@@ -47,7 +49,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.config import BENCH_DIR, REPORTS_DIR, settings  # noqa: E402
 from src.ingest import index_texts  # noqa: E402
 from src.pipeline import answer_question  # noqa: E402
-from src.squad_metrics import exact_match_score, f1_score  # noqa: E402
+from src.squad_metrics import contains_gold, exact_match_score, f1_score  # noqa: E402
 
 GRANULARITIES = ("sentence", "chunk")
 ARMS = ("baseline", "guarded")
@@ -137,18 +139,26 @@ def run_one_item(
         abstained = result.confidence.abstained
         gate_a_passed = result.confidence.gate_a.passed if result.confidence.gate_a else None
         gate_b_passed = result.confidence.gate_b.passed if result.confidence.gate_b else None
-        contradiction = (
-            result.confidence.gate_b.score < settings.confidence.gate_b_threshold
-            if result.confidence.gate_b and result.confidence.gate_b.score is not None
-            else False
-        )
+        gate_b = result.confidence.gate_b
+        # Two different events, kept apart: Gate B failing (score under the
+        # threshold, usually low entailment) and the contradiction veto firing
+        # (a claim the NLI head says the passages refute). Milestone 4 reported
+        # the first under the name of the second.
+        gate_b_failed = bool(gate_b and gate_b.score < settings.confidence.gate_b_threshold)
+        contradiction = bool(gate_b and gate_b.conflicts)
 
-        # Compute QA metrics
-        em = exact_match_score(answer, gold_answers)
-        f1 = f1_score(answer, gold_answers)
+        # Score what the user was shown. A Gate B abstention keeps the raw
+        # answer in ``result.answer`` for inspection, and scoring that gave the
+        # guarded arm credit for answers it suppressed.
+        shown = "" if abstained else answer
+        em = exact_match_score(shown, gold_answers)
+        f1 = f1_score(shown, gold_answers)
+        correct = contains_gold(shown, gold_answers)
 
-        # Hallucination: answered (not abstained) but wrong
-        hallucination = not abstained and not em
+        # Hallucination: answered but wrong. Gold containment rather than EM:
+        # a sentence-length answer always fails EM, which counted every
+        # answered guarded item as a hallucination.
+        hallucination = not abstained and not correct
 
         # Over-abstention: Gate A refused even though retrieval surfaced gold units
         # (for this we need to check if any retrieved unit is gold)
@@ -173,11 +183,16 @@ def run_one_item(
             "gate_b_passed": gate_b_passed,
             "exact_match": em,
             "f1": round(f1, 4),
+            "correct": correct,
+            "self_abstained": bool(result.generation and result.generation.self_reported_insufficient),
             "hallucination": hallucination,
             "over_abstention": over_abstention,
+            "gate_b_failed": gate_b_failed,
             "contradiction": contradiction,
             "rerank_relevancy": result.confidence.gate_a.score if result.confidence.gate_a else None,
-            "nli_faithfulness": result.confidence.gate_b.score if result.confidence.gate_b else None,
+            # Raw mean entailment, and the post-veto score the gate decided on.
+            "nli_faithfulness": gate_b.nli_faithfulness if gate_b else None,
+            "gate_b_score": gate_b.score if gate_b else None,
             "composite_score": result.confidence.composite,
             "n_retrieved": len(result.retrieval.chunks),
             "n_gold_retrieved": len(set(retrieved_indices) & gold_units),
@@ -238,6 +253,10 @@ def aggregate(rows: list[dict]) -> dict:
         "n": len(valid),
         "exact_match": round(statistics.mean(r["exact_match"] for r in valid), 4),
         "f1": round(statistics.mean(r["f1"] for r in valid), 4),
+        "accuracy_contains_gold": round(statistics.mean(r["correct"] for r in valid), 4),
+        "risk_among_answered": round(
+            sum(not r["correct"] for r in answered) / len(answered), 4
+        ) if answered else None,
         "answer_rate": round(len(answered) / len(valid), 4),
         "hallucination_rate": round(
             sum(r["hallucination"] for r in valid) / len(valid), 4
@@ -245,8 +264,14 @@ def aggregate(rows: list[dict]) -> dict:
         "over_abstention_rate": round(
             sum(r["over_abstention"] for r in valid) / len(valid), 4
         ),
+        "gate_b_failure_rate": round(
+            sum(r["gate_b_failed"] for r in valid) / len(valid), 4
+        ),
         "gate_b_contradiction_rate": round(
             sum(r["contradiction"] for r in valid) / len(valid), 4
+        ),
+        "self_abstention_rate": round(
+            sum(r["self_abstained"] for r in valid) / len(valid), 4
         ),
         "mean_rerank_relevancy": round(
             statistics.mean(
@@ -302,7 +327,11 @@ def print_table(report: dict) -> None:
     row("answer_rate", "answer_rate")
     row("hallucination_rate", "hallucination_rate")
     row("over_abstention_rate", "over_abstention_rate")
+    row("accuracy_contains_gold", "accuracy_contains_gold")
+    row("risk_among_answered", "risk_among_answered")
+    row("gate_b_failure_rate", "gate_b_failure_rate")
     row("gate_b_contradiction_rate", "gate_b_contradiction_rate")
+    row("self_abstention_rate", "self_abstention_rate")
     row("mean_rerank_relevancy", "mean_rerank_relevancy")
     row("mean_nli_faithfulness", "mean_nli_faithfulness")
     print()

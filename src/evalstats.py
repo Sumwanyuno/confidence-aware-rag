@@ -255,3 +255,50 @@ def judge_agreement(
             nli_pass, [s >= t_matched for s in ls]
         ),
     }
+
+
+def wilson_interval(successes: int, n: int, *, z: float = 1.96) -> tuple[float, float]:
+    """95% Wilson score interval for a proportion.
+
+    Preferred over the textbook ``p +/- 1.96*sqrt(p(1-p)/n)`` because that
+    interval collapses to zero width at p = 0 or 1 and spills outside [0, 1]
+    near the edges - exactly where a 3/75 hallucination count sits.
+    """
+    if n <= 0:
+        return (float("nan"), float("nan"))
+    p = successes / n
+    denom = 1 + z * z / n
+    centre = (p + z * z / (2 * n)) / denom
+    half = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / denom
+    return (max(0.0, centre - half), min(1.0, centre + half))
+
+
+def mcnemar_exact(only_a: int, only_b: int) -> float:
+    """Two-sided exact McNemar p-value for paired binary outcomes.
+
+    Two runs over the *same* items are paired, so comparing their rates with an
+    unpaired test throws information away. Only the discordant items (the
+    outcome changed between runs) carry evidence; under the null each flip is
+    equally likely to go either way, which is a Binomial(n, 0.5) test.
+    """
+    n = only_a + only_b
+    if n == 0:
+        return 1.0
+    k = min(only_a, only_b)
+    tail = sum(math.comb(n, i) for i in range(k + 1)) / 2**n
+    return min(1.0, 2 * tail)
+
+
+def auroc(scores: list[float], positive: list[bool]) -> float:
+    """P(score of a random positive > score of a random negative), ties at half.
+
+    The question "does this confidence score separate correct answers from
+    wrong ones" independent of any threshold. 0.5 is a coin flip.
+    """
+    pos = [s for s, y in zip(scores, positive, strict=True) if y]
+    neg = [s for s, y in zip(scores, positive, strict=True) if not y]
+    if not pos or not neg:
+        return float("nan")
+    ranks = _ranks(list(scores))
+    rank_sum = sum(r for r, y in zip(ranks, positive, strict=True) if y)
+    return (rank_sum - len(pos) * (len(pos) + 1) / 2) / (len(pos) * len(neg))

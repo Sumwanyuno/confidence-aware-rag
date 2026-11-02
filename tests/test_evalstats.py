@@ -16,10 +16,13 @@ from src.evalstats import (
     _ranks,
     _spearman,
     aurc,
+    auroc,
     coverage_at_risk,
     judge_agreement,
+    mcnemar_exact,
     risk_at_coverage,
     risk_coverage_curve,
+    wilson_interval,
 )
 
 
@@ -146,3 +149,27 @@ class TestJudgeAgreement:
         d = _binary_agreement(xs, ys)
         assert d["observed_agreement"] == pytest.approx(0.8)
         assert d["cohens_kappa"] < 0.5
+
+
+class TestIntervalsAndTests:
+    def test_wilson_contains_point_and_stays_in_unit_range(self):
+        lo, hi = wilson_interval(3, 75)
+        assert 0.0 <= lo < 3 / 75 < hi <= 1.0
+        lo, hi = wilson_interval(0, 10)
+        assert lo == 0.0 and hi > 0.0
+
+    def test_wilson_reference_value(self):
+        # 8/75: reference Wilson interval is about [0.055, 0.197].
+        lo, hi = wilson_interval(8, 75)
+        assert abs(lo - 0.0551) < 1e-3 and abs(hi - 0.1972) < 1e-3
+
+    def test_mcnemar_symmetric_and_bounded(self):
+        assert mcnemar_exact(0, 0) == 1.0
+        assert mcnemar_exact(1, 6) == mcnemar_exact(6, 1)
+        # 0 vs 6 discordant: 2 * 0.5**6 = 0.03125
+        assert abs(mcnemar_exact(0, 6) - 0.03125) < 1e-12
+
+    def test_auroc_extremes(self):
+        assert auroc([0.9, 0.8, 0.1, 0.2], [True, True, False, False]) == 1.0
+        assert auroc([0.1, 0.2, 0.9, 0.8], [True, True, False, False]) == 0.0
+        assert auroc([0.5, 0.5], [True, False]) == 0.5
