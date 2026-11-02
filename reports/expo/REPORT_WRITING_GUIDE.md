@@ -85,7 +85,7 @@ Short explanations, each with a citation:
 - **Hallucination** (Ji et al., 2023 survey)
 - **NLI** as a faithfulness check: premise → hypothesis, labelled
   entailment / neutral / contradiction
-- **Cross-encoder rerankers** (MS MARCO; Nguyen et al., 2016)
+- **Cross-encoder rerankers** (MS MARCO; Bajaj et al., 2016)
 - **Selective prediction:** answer-or-abstain and risk–coverage (Geifman &
   El-Yaniv, 2017)
 
@@ -324,7 +324,7 @@ each on Google Scholar before you list it.
 - Geifman & El-Yaniv, 2017. Selective Classification for Deep Neural Networks. NeurIPS.
 - He et al., 2021. DeBERTa: Decoding-enhanced BERT with Disentangled Attention. ICLR.
 - Reimers & Gurevych, 2019. Sentence-BERT. EMNLP.
-- Nguyen et al., 2016. MS MARCO: A Human Generated MAchine Reading COmprehension Dataset.
+- Bajaj et al., 2016. MS MARCO: A Human Generated MAchine Reading COmprehension Dataset (arXiv:1611.09268).
 
 ## 9. Annexure (up to 5 links)
 1. **GitHub repository:** github.com/Sumwanyuno/confidence-aware-rag. It is
