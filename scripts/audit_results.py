@@ -55,10 +55,11 @@ from src.squad_metrics import (  # noqa: E402
 from src.store import connect  # noqa: E402
 
 SQUAD_RUNS = {"m2_uncalibrated": "squad2-dev", "m3_calibrated": "squad2-v2"}
-# Fresh guarded-only runs (M5): identical setup and thresholds, Gate B v1
-# (whole-passage premise) and v2 (sentence-window premise), run back to back
-# so generation noise is shared.
-GATE_B_RUNS = {"m5_gate_b_v1": "squad2-v5-v1", "m5_gate_b_v2": "squad2-v5"}
+# Fresh guarded-only runs (M5): identical setup and thresholds, differing only
+# in Gate B's premise - v1 whole passages, windows only (rejected: it fails
+# claims that summarise a list), and v2 passages plus windows.
+GATE_B_RUNS = {"m5_gate_b_v1": "squad2-v5-v1", "m5_gate_b_window_only": "squad2-v5",
+               "m5_gate_b_v2": "squad2-v6"}
 CAP = settings.confidence.contradiction_cap
 
 

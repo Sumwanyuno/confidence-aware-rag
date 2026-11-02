@@ -135,7 +135,9 @@ def check_gate_b(hit):
     b_good = ev.gate_b("What are the stages of a RAG pipeline?", grounded, contexts)
     record(
         "gate_b(grounded)",
-        PASS if b_good.score > 0 else FAIL,
+        # Must clear the gate, not merely score above zero: a check this weak
+        # let a Gate B change that rejected this exact answer (0.004) pass.
+        PASS if b_good.passed else FAIL,
         f"score={b_good.score:.3f} passed={b_good.passed} claims={len(b_good.claims)}",
     )
 
@@ -161,8 +163,16 @@ def check_composite(a_hit, b_good, b_bad):
     ev = get_evaluator()
     good = ev.decide(a_hit, b_good)
     bad = ev.decide(a_hit, b_bad)
-    record("decide(grounded)", PASS, f"{good.verdict} composite={good.composite:.3f}")
-    record("decide(fabricated)", PASS, f"{bad.verdict} composite={bad.composite:.3f}")
+    record(
+        "decide(grounded)",
+        PASS if not good.abstained else FAIL,
+        f"{good.verdict} composite={good.composite:.3f}",
+    )
+    record(
+        "decide(fabricated)",
+        PASS if bad.abstained else FAIL,
+        f"{bad.verdict} composite={bad.composite:.3f}",
+    )
     record(
         "fabricated scores lower",
         PASS if bad.composite < good.composite else FAIL,

@@ -97,6 +97,13 @@ def premise_windows(contexts: list[str], size: int = WINDOW_SENTENCES) -> list[t
     sentences (stride 1) keep the premise short while leaving room for "The
     park ..." to find "Woodward Park" a sentence earlier - the SummaC
     approach. Passages no longer than one window are used whole.
+
+    Windows alone fail the other way: a claim that summarises a list ("five
+    stages: ingestion, chunking, ...") needs the whole passage, and a window
+    holding two of the five items reads as a contradiction. Gate B v2
+    therefore uses premise mode "both" - every passage whole *and* its
+    windows - and keeps the best-supporting premise, so short facts match a
+    window and summaries match the passage.
     """
     out: list[tuple[str, int]] = []
     for i, ctx in enumerate(contexts):
@@ -245,11 +252,17 @@ class NLIScorer:
         premise = premise or settings.confidence.nli_premise
         # The UI shows the original claim; only the NLI input is rewritten.
         hyps = [build_hypothesis(c, question, mode) for c in claims]
-        if premise == "window":
+        premises, origin = list(contexts), list(range(len(contexts)))
+        if premise in ("window", "both"):
             windows = premise_windows(contexts)
-            premises, origin = [w for w, _ in windows], [o for _, o in windows]
-        else:
-            premises, origin = list(contexts), list(range(len(contexts)))
+            if premise == "window":
+                premises, origin = [], []
+            # A passage short enough to be its own window is already present.
+            seen = set(premises)
+            for w, o in windows:
+                if w not in seen:
+                    premises.append(w)
+                    origin.append(o)
         pairs = [(p, hyp) for hyp in hyps for p in premises]
         probs = self._softmax_rows(model.predict(pairs, show_progress_bar=False))
 

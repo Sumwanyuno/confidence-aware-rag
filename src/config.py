@@ -129,13 +129,15 @@ class ConfidenceConfig:
     # Kept at "claim": question-conditioning helped SQuAD slightly but hurt
     # HotpotQA (reports/gate_b_v2.json), so it does not generalise.
     nli_hypothesis: str = os.getenv("RAG_NLI_HYPOTHESIS", "claim")
-    # What NLI uses as the premise: "passage" (v1, each retrieved passage
-    # whole) or "window" (overlapping 3-sentence windows of each passage).
-    # Gate B v2 uses "window": on the M3 SQuAD answers it lifted Gate B's AUROC
-    # from 0.56 to 0.67 and cut the rejection of correct answers from 65% to
-    # 43%, without hurting HotpotQA. Cost: ~196 ms vs ~119 ms per Gate B call.
+    # What NLI uses as the premise:
+    #   "passage" -> each retrieved passage whole (Gate B v1, Milestones 1-4)
+    #   "window"  -> overlapping 3-sentence windows only
+    #   "both"    -> passages and their windows, best support wins (Gate B v2)
+    # Windows fix NLI going neutral on long paragraphs; keeping the whole
+    # passage too stops a claim that summarises a list from failing because
+    # no single window holds the whole list. Evidence: reports/gate_b_v2.json.
     # Set RAG_NLI_PREMISE=passage to reproduce Milestones 1-4.
-    nli_premise: str = os.getenv("RAG_NLI_PREMISE", "window")
+    nli_premise: str = os.getenv("RAG_NLI_PREMISE", "both")
     # Gate A backend: a relevance reranker, NOT an NLI model. Before generation
     # there is no hypothesis to entail, so the question is "does this passage
     # answer this query", which is a ranking task.

@@ -14,6 +14,7 @@ each configuration:
   qa_short  - question + claim for claims of <= 8 words, whole passage
   qa        - question + every claim, whole passage
   window    - bare claim vs overlapping 3-sentence windows of each passage
+  both      - bare claim vs passages and windows together (Gate B v2)
   qa_short+window, qa+window - both changes together
 
 Measured:
@@ -58,6 +59,7 @@ CONFIGS = {
     "qa_short": ("qa_short", "passage"),
     "qa": ("qa", "passage"),
     "window": ("claim", "window"),
+    "both": ("claim", "both"),
     "qa_short+window": ("qa_short", "window"),
     "qa+window": ("qa", "window"),
 }
