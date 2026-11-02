@@ -63,7 +63,8 @@ CONFIGS = {
     "qa_short+window": ("qa_short", "window"),
     "qa+window": ("qa", "window"),
 }
-MODES = tuple(CONFIGS)
+MODES = tuple(CONFIGS)  # narrowed by --configs
+GRANULARITIES = ("sentence", "chunk")  # narrowed by --hotpot-granularity
 RUN_TAG = "squad2-v2"
 V1_THRESHOLD = 0.25
 GRID = [round(0.05 * i, 2) for i in range(4, 20)]  # 0.20 .. 0.95, never below the cap
@@ -85,7 +86,8 @@ def gate_b_scores(question: str, answer: str, contexts: list[str]) -> dict[str, 
     cfg = settings.confidence
     original = (cfg.nli_hypothesis, cfg.nli_premise)
     try:
-        for name, (hyp, prem) in CONFIGS.items():
+        for name in MODES:
+            hyp, prem = CONFIGS[name]
             cfg.nli_hypothesis, cfg.nli_premise = hyp, prem
             gb = ev.gate_b(question, answer, contexts)
             out[name] = {"score": gb.score, "contradiction": bool(gb.conflicts)}
@@ -242,7 +244,7 @@ def hotpot(bench: Path, rows_path: Path) -> dict:
     rows = [json.loads(line) for line in rows_path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
     report = {}
-    for gran in ("sentence", "chunk"):
+    for gran in GRANULARITIES:
         sub = [r for r in rows if r["granularity"] == gran and r["arm"] == "baseline"]
         scored = []
         for n, r in enumerate(sub, 1):
@@ -282,10 +284,20 @@ def main() -> int:
     ap.add_argument("--hotpot-bench", type=Path, default=BENCH_DIR / "hotpot_dev_150.jsonl")
     ap.add_argument("--hotpot-rows", type=Path, default=REPORTS_DIR / "generation_hotpot_m4_rows.jsonl")
     ap.add_argument("--skip-hotpot", action="store_true")
+    ap.add_argument("--configs", help="comma-separated subset of configurations, e.g. v1,both")
+    ap.add_argument("--hotpot-granularity", choices=("sentence", "chunk"))
     ap.add_argument("--out", type=Path, default=REPORTS_DIR / "gate_b_v2.json")
     args = ap.parse_args()
 
     settings.confidence.scorer = "nli"
+    global MODES, GRANULARITIES
+    if args.configs:
+        MODES = tuple(c.strip() for c in args.configs.split(","))
+        unknown = set(MODES) - set(CONFIGS)
+        if unknown:
+            raise SystemExit(f"unknown configs: {sorted(unknown)}")
+    if args.hotpot_granularity:
+        GRANULARITIES = (args.hotpot_granularity,)
     report = {"squad": squad(args.bench)}
     if not args.skip_hotpot:
         report["hotpot"] = hotpot(args.hotpot_bench, args.hotpot_rows)

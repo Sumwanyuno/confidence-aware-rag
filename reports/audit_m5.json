@@ -330,7 +330,7 @@
         }
       }
     },
-    "m5_gate_b_v2": {
+    "m5_gate_b_window_only": {
       "guarded": {
         "n": 150,
         "hallucination": {
@@ -394,6 +394,70 @@
         }
       }
     },
+    "m5_gate_b_v2": {
+      "guarded": {
+        "n": 150,
+        "hallucination": {
+          "k": 11,
+          "n": 75,
+          "rate": 0.1467,
+          "ci95": [
+            0.0839,
+            0.2438
+          ]
+        },
+        "over_abstention": {
+          "k": 36,
+          "n": 75,
+          "rate": 0.48,
+          "ci95": [
+            0.3707,
+            0.5913
+          ]
+        },
+        "em_all_as_reported": 0.4267,
+        "em_all_corrected": 0.4533,
+        "f1_all_corrected": 0.5525,
+        "em_answerable_as_reported": 0.0,
+        "em_answerable_corrected": 0.0533,
+        "contains_gold_answerable": {
+          "k": 38,
+          "n": 75,
+          "rate": 0.5067,
+          "ci95": [
+            0.396,
+            0.6167
+          ]
+        },
+        "selective_accuracy_answered": {
+          "k": 38,
+          "n": 39,
+          "rate": 0.9744,
+          "ci95": [
+            0.8682,
+            0.9955
+          ]
+        }
+      },
+      "guarded_abstention_sources": {
+        "answerable": {
+          "n": 75,
+          "gate_a": 15,
+          "generator_self_refusal": 3,
+          "gate_b": 18,
+          "answered": 39,
+          "gate_b_suppressed_but_correct": 18,
+          "gate_b_suppressed_with_contradiction": 15
+        },
+        "unanswerable": {
+          "n": 75,
+          "gate_a": 33,
+          "generator_self_refusal": 27,
+          "gate_b": 4,
+          "answered": 11
+        }
+      }
+    },
     "m5_gate_b_v1_to_v2": {
       "unanswerable_answered": {
         "only_before": 0,
@@ -401,9 +465,9 @@
         "mcnemar_exact_p": 0.5
       },
       "answerable_answered": {
-        "only_before": 2,
+        "only_before": 0,
         "only_after": 17,
-        "mcnemar_exact_p": 0.0007
+        "mcnemar_exact_p": 0.0
       }
     }
   },
