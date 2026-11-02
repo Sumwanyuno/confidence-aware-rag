@@ -93,6 +93,9 @@ python scripts/calibrate.py                     # fit thresholds -> reports/cali
 python scripts/risk_coverage.py                  # AURC + figures in reports/figures/
 python scripts/run_benchmark.py --tag squad2-judge --limit 50 --scorer both --arm guarded
 python scripts/judge_agreement.py               # NLI vs LLM judge, correlation + kappa
+python scripts/build_hotpot.py                  # prepare the HotpotQA sample
+python scripts/run_retrieval_hotpot.py           # sentence vs. chunk retrieval
+python scripts/run_generation_hotpot.py          # guarded vs. baseline generation
 ```
 
 Launch the app:
@@ -131,6 +134,7 @@ streamlit run app.py
 | `scripts/bench_latency.py` | Warm per-stage latency of the confidence layer |
 | `scripts/make_thumbnail.py` | Regenerates `assets/thumbnail.png` (architecture banner) |
 | `scripts/make_milestone_report.py` | Regenerates the milestone report `.docx` |
+| `scripts/make_milestone5_report.py` | Builds the consolidated Milestone 5 report from saved evaluation results |
 | `tests/` | Unit tests for the scoring maths, gate decision table, and eval statistics |
 
 ---
@@ -152,13 +156,13 @@ logs the disagreement, which is the basis of the local-vs-LLM-judge agreement st
 
 ## Status
 
-**Milestones 1–4 complete.** Environment, ingestion, retrieval, both gates,
+**Milestones 1–4 complete; Milestone 5 consolidates the results and reproducibility evidence.** Environment, ingestion, retrieval, both gates,
 composite scoring, telemetry, Streamlit app and monitoring dashboard (M1);
 local generation end to end, the SQuAD 2.0 harness and the baseline control
 arm (M2); threshold calibration, risk–coverage analysis and the
 NLI-vs-LLM-judge agreement study (M3); HotpotQA multi-hop evaluation,
 chunk-vs-sentence granularity ablation, and the Gate B architectural
-diagnosis (M4).
+diagnosis (M4). Milestone 5's final report is `reports/Milestone5_Report.docx`.
 
 ### Milestone 1 (27 Aug 2026)
 
@@ -268,27 +272,43 @@ answers from the wider chunk context when no confidence gate intervenes.
 | Answer rate | 100% | 100% | 17% | 22% |
 | Gate B contradiction rate | 75% | 71% | 24% | 39% |
 
-**The confidence bottleneck** — Gate B's 70–75% false-contradiction rate
-on HotpotQA is not a bug. DeBERTa correctly rejects multi-hop answers
-because single-premise NLI has no mechanism for chaining reasoning across
-passages. A claim that requires combining Passage A and Passage B is not
-entailed by either passage alone, so the NLI head returns neutral or
-contradiction — structurally correct within its own frame, structurally
-wrong for this task. This is a **definitive architectural boundary**:
-strict single-premise NLI fundamentally bottlenecks multi-hop RAG.
-Addressing it would require multi-premise entailment, explicit reasoning
-decomposition, or an LLM-as-judge replacement — each a substantial
-architectural change, not a threshold adjustment.
+**The confidence bottleneck** — Gate B marked 70–75% of baseline answers
+as contradictions on this HotpotQA sample. This is evidence that the current
+single-premise NLI gate struggles with multi-hop answers, but it does not by
+itself prove that every such flag is false or establish a universal architectural
+boundary. The retrieval artifact reports zero items with both supporting facts
+co-located in a chunk, so this run does not test whether one retrieved premise
+can contain both hops. Multi-premise entailment, reasoning decomposition, or an
+LLM judge remain candidate follow-up designs; they were not compared in this
+milestone.
 
-Gate A transfers cleanly: mean reranker relevancy is 0.84 for chunks,
-well above the 0.45 threshold. The reranker scores passages independently
-and is unaffected by multi-hop structure.
+Mean reranker relevancy is 0.84 for chunks, above the 0.45 threshold. This
+average does not establish per-item Gate A accuracy or prove clean transfer;
+it shows that low mean reranker scores do not explain the low guarded answer
+rate in this run.
 
-### Remaining milestone
+### Milestone 5 finalization
 
-| Milestone | Due | Focus |
-|---|---|---|
-| 5 | 24 Sep 2026 | Results consolidation, reproducibility pass, final report and demo |
+Reproduce the model-free checks and launch the project demo:
+
+```bash
+python -m pytest tests/ -q -p no:cacheprovider
+ruff check .
+python scripts/smoke_test.py
+streamlit run app.py
+```
+
+The smoke test and app need the configured local embedding and NLI models.
+Generation also needs the selected LLM provider (Ollama by default). The
+benchmark result files under `reports/` are the recorded experiment outputs;
+the two HotpotQA sweep commands above rerun those experiments and require the
+model services configured in `.env`.
+
+Generate the final report with:
+
+```bash
+python scripts/make_milestone5_report.py
+```
 
 ## Running tests
 

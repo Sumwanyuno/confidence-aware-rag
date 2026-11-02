@@ -54,11 +54,27 @@ def main() -> int:
     t_a = float(thresholds.get("gate_a", settings.confidence.gate_a_threshold))
     t_b = float(thresholds.get("gate_b", settings.confidence.gate_b_threshold))
 
+    # The judge's scores live on their own scales, so the local scorer's
+    # calibrated threshold cannot be reused for it. DeepEval's contextual
+    # relevancy is a ratio of relevant statements and in this run never exceeds
+    # 0.45, so applying Gate A's 0.45 to it fails every item and yields a kappa
+    # of zero that says nothing about whether the two scorers agree. Its
+    # faithfulness verdict is effectively binary (0.0 or 1.0), so 0.5 is the
+    # only cut-off with a meaning. Both are stated here rather than inherited.
+    t_llm_a = 0.5
+    t_llm_b = 0.5
+
     gate_a = judge_agreement(
-        both["rerank_relevancy"].tolist(), both["llm_relevancy"].tolist(), t_a
+        both["rerank_relevancy"].tolist(),
+        both["llm_relevancy"].tolist(),
+        t_a,
+        llm_threshold=t_llm_a,
     )
     gate_b = judge_agreement(
-        both["nli_faithfulness"].tolist(), both["llm_faithfulness"].tolist(), t_b
+        both["nli_faithfulness"].tolist(),
+        both["llm_faithfulness"].tolist(),
+        t_b,
+        llm_threshold=t_llm_b,
     )
 
     # Latency cost of the judge: rows where it ran vs the nli-only sweep.
@@ -77,7 +93,12 @@ def main() -> int:
     report = {
         "run_tag": args.tag,
         "n": len(both),
-        "thresholds_used": {"gate_a": t_a, "gate_b": t_b},
+        "thresholds_used": {
+            "nli_gate_a": t_a,
+            "nli_gate_b": t_b,
+            "llm_gate_a": t_llm_a,
+            "llm_gate_b": t_llm_b,
+        },
         "gate_a_relevancy": gate_a,
         "gate_b_faithfulness": gate_b,
         # Medians, not means. Two rows in this run carry Gate A latencies of 10
@@ -92,12 +113,21 @@ def main() -> int:
         },
     }
 
-    print(f"Agreement study on {len(both)} items (thresholds: A={t_a}, B={t_b})")
+    print(
+        f"Agreement study on {len(both)} items "
+        f"(nli thresholds A={t_a} B={t_b}; llm thresholds A={t_llm_a} B={t_llm_b})"
+    )
     for name, g in (("Gate A (relevancy)", gate_a), ("Gate B (faithfulness)", gate_b)):
         d = g.get("decision_agreement", {})
+        rm = g.get("decision_agreement_rate_matched", {})
         print(
-            f"  {name}: n={g['n']}  pearson={g['pearson']}  spearman={g['spearman']}  "
-            f"kappa={d.get('cohens_kappa')}  observed={d.get('observed_agreement')}"
+            f"  {name}: n={g['n']}  spearman={g['spearman']}  "
+            f"kappa={d.get('cohens_kappa')} observed={d.get('observed_agreement')}"
+        )
+        print(
+            f"      rate-matched: kappa={rm.get('cohens_kappa')} "
+            f"observed={rm.get('observed_agreement')} "
+            f"(both scorers pass {rm.get('both_pass', 0) + rm.get('only_x', 0)} items)"
         )
     print(f"  Latency: judge run {report['latency_ms']['judge_run_gate_b_median']}ms vs "
           f"nli-only {report['latency_ms']['nli_only_gate_b_median']}ms (Gate B, medians)")

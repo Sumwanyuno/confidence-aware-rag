@@ -155,11 +155,11 @@ def section_calibration(doc: Document, cal: dict) -> None:
 
     para(
         doc,
-        f"Thresholds were fitted against the 150-item SQuAD 2.0 sample using the "
-        f"answerable/unanswerable labels as ground truth. Gate A was calibrated by Youden's J "
-        f"(the threshold that maximizes true positive rate minus false positive rate) over the "
-        f"reranker score. Gate B was calibrated by F1 over mean NLI faithfulness, constrained to "
-        f"stay above the 0.15 contradiction cap so calibration cannot weaken the hard-fail rule.",
+        "Thresholds were fitted against the 150-item SQuAD 2.0 sample using the "
+        "answerable/unanswerable labels as ground truth. Gate A was calibrated by Youden's J "
+        "(the threshold that maximizes true positive rate minus false positive rate) over the "
+        "reranker score. Gate B was calibrated by F1 over mean NLI faithfulness, constrained to "
+        "stay above the 0.15 contradiction cap so calibration cannot weaken the hard-fail rule.",
     )
     para(
         doc,
@@ -375,54 +375,92 @@ def section_agreement(doc: Document, judge: dict) -> None:
         f"the llama3.1:8b generator, because a model grading its own output is a known source of "
         f"self-preference bias. An earlier judge choice, qwen2.5:7b-instruct, had to be replaced: it "
         f"answered \"no\" to every faithfulness verdict regardless of the claim, deterministically at "
-        f"temperature 0, which makes its scores meaningless rather than merely noisy. Agreement is "
-        f"reported as Spearman correlation on the continuous scores and Cohen's kappa on the "
-        f"pass/fail decision at the calibrated thresholds.",
+        f"temperature 0, which makes its scores meaningless rather than merely noisy."
+    )
+
+    para(
+        doc,
+        f"Agreement has to be reported two ways, because the first way is misleading on its own. "
+        f"Applying the calibrated NLI threshold to both scorers assumes the two scores share a "
+        f"scale, and they do not: the judge's relevancy score never exceeds "
+        f"{ga['llm_range'][1]:.3f} anywhere in this subset, while the reranker averages "
+        f"{ga['mean_nli']:.3f}. Under a common 0.45 cut-off the judge therefore fails every single "
+        f"item, and the resulting kappa of zero says nothing about whether the two scorers pick out "
+        f"the same passages. The second measurement removes the scale by giving the judge whichever "
+        f"cut-off lets through the same number of items the NLI scorer passed, so kappa then "
+        f"measures agreement on the ranking, which is the claim actually being tested. Spearman's "
+        f"rho is reported alongside for the same reason: it depends only on order.",
     )
 
     table(
         doc,
-        ["Gate", "n", "Spearman ρ", "Cohen's κ", "Observed agreement"],
+        ["Gate", "n", "ρ", "κ (shared cut-off)", "κ (rate-matched)", "Observed (rate-matched)"],
         [
             [
                 "Gate A (relevancy)",
                 str(ga["n"]),
                 f"{ga['spearman']:.3f}",
-                f"{ga['decision_agreement']['cohens_kappa']:.3f}" if ga['decision_agreement']['cohens_kappa'] is not None else "0.0",
-                f"{ga['decision_agreement']['observed_agreement']:.1%}",
+                f"{ga['decision_agreement']['cohens_kappa']:.3f}",
+                f"{ga['decision_agreement_rate_matched']['cohens_kappa']:.3f}",
+                f"{ga['decision_agreement_rate_matched']['observed_agreement']:.1%}",
             ],
             [
                 "Gate B (faithfulness)",
                 str(gb["n"]),
                 f"{gb['spearman']:.3f}",
                 f"{gb['decision_agreement']['cohens_kappa']:.3f}",
-                f"{gb['decision_agreement']['observed_agreement']:.1%}",
+                f"{gb['decision_agreement_rate_matched']['cohens_kappa']:.3f}",
+                f"{gb['decision_agreement_rate_matched']['observed_agreement']:.1%}",
             ],
         ],
-        widths=[2.0, 0.8, 1.3, 1.3, 1.8],
+        widths=[1.6, 0.5, 0.7, 1.3, 1.3, 1.4],
     )
 
     para(
         doc,
-        f"Gate A shows near-zero agreement (κ = {ga['decision_agreement']['cohens_kappa'] or 0.0:.3f}, "
-        f"ρ = {ga['spearman']:.3f}): the judge passed 0 items the NLI scorer passed, and both failed "
-        f"on {ga['decision_agreement']['both_fail']}. The NLI scorer alone passed "
-        f"{ga['decision_agreement']['only_x']}, which the judge failed. This is a genuine disagreement, "
-        f"not a measurement error.",
+        f"On Gate A, rate-matching accounts for a large part of the apparent disagreement but not "
+        f"for all of it. The shared cut-off produces κ = 0.000 with the judge passing nothing; once "
+        f"both scorers are made to pass {ga['decision_agreement_rate_matched']['both_pass'] + ga['decision_agreement_rate_matched']['only_x']} "
+        f"items each, raw agreement rises from "
+        f"{ga['decision_agreement']['observed_agreement']:.1%} to "
+        f"{ga['decision_agreement_rate_matched']['observed_agreement']:.1%} and they concur on "
+        f"{ga['decision_agreement_rate_matched']['both_pass']} passes and "
+        f"{ga['decision_agreement_rate_matched']['both_fail']} failures. But κ only moves to "
+        f"{ga['decision_agreement_rate_matched']['cohens_kappa']:.3f}, which is negligible: at that "
+        f"pass rate two scorers would overlap on roughly this many items by chance alone. So the "
+        f"headline κ of zero was substantially a threshold artifact, and correcting it does not "
+        f"rescue the underlying claim. The two scorers do not rank passages the same way, and "
+        f"ρ = {ga['spearman']:.3f} says the same thing independently of any cut-off.",
     )
 
     para(
         doc,
-        f"Gate B shows weak negative agreement (κ = {gb['decision_agreement']['cohens_kappa']:.3f}, "
-        f"ρ = {gb['spearman']:.3f}) over the {gb['n']} items where both scorers produced a score. "
-        f"They agreed on {gb['decision_agreement']['both_pass']} passes and "
-        f"{gb['decision_agreement']['both_fail']} failure, and disagreed on "
-        f"{gb['decision_agreement']['only_x'] + gb['decision_agreement']['only_y']} items, almost "
-        f"all in one direction: the judge passed {gb['decision_agreement']['only_y']} items the NLI "
-        f"scorer failed. A negative kappa means the two agreed less often than chance alone would "
-        f"predict, so on this evidence the local scorer is not a substitute for the judge on Gate B. "
-        f"The sample is small ({gb['n']} items), which is itself a limitation of the study rather "
-        f"than a defence of the result.",
+        f"On Gate B, rate-matching changes nothing, for a reason worth stating: the judge's "
+        f"faithfulness score takes only {gb['llm_distinct_values']} distinct values across the "
+        f"subset, 0.0 and 1.0. DeepEval's faithfulness metric is returning a verdict, not a "
+        f"calibrated score, so there is no continuous ranking to rate-match against and both "
+        f"measurements collapse to the same table. κ = {gb['decision_agreement']['cohens_kappa']:.3f} "
+        f"is slightly below zero, meaning the two agreed marginally less often than chance would "
+        f"predict. The disagreement is one-sided: the judge passed "
+        f"{gb['decision_agreement']['only_y']} items the NLI scorer failed, against "
+        f"{gb['decision_agreement']['only_x']} in the other direction. A binary reference also "
+        f"means ρ = {gb['spearman']:.3f} should not be read as a correlation between two graded "
+        f"opinions.",
+    )
+
+    para(
+        doc,
+        f"What this study can and cannot support. It cannot support the claim that the local scorer "
+        f"is interchangeable with the judge: on both gates, agreement beyond chance is "
+        f"indistinguishable from zero even after the scale problem is removed. It equally cannot "
+        f"support the opposite conclusion with any confidence, because the samples are too small. "
+        f"Gate A rests on {ga['n']} items and Gate B on {gb['n']}, the latter because the judge only "
+        f"scores faithfulness on items that reached generation. At n = {gb['n']}, a single "
+        f"reclassified item moves kappa by roughly 0.1, so the difference between "
+        f"{gb['decision_agreement']['cohens_kappa']:.3f} and a modest positive value is one or two "
+        f"answers. The honest reading is that the local scorer has not been shown to reproduce the "
+        f"judge's decisions, and that establishing either result properly needs a larger subset than "
+        f"this milestone ran.",
     )
 
     para(
@@ -453,9 +491,15 @@ def section_status(doc: Document) -> None:
             "Gate A's weak AUC (0.652) means the answerable/unanswerable split is only marginally "
             "predictable from retrieval features alone on this sample. Multi-hop questions (HotpotQA) "
             "are expected to degrade this further, since a reranker scores passages individually.",
-            "The judge disagreement is real and was not debugged away. The local NLI scorer and the "
-            "LLM judge are measuring different things, and the project's claim that they are "
-            "interchangeable is not supported by this data.",
+            "The judge disagreement is real and was not debugged away, but it is not solely a "
+            "failure of the local scorer. DeepEval's faithfulness metric returned only two "
+            "distinct values across the subset, 0.0 and 1.0: it emits a verdict, not a calibrated "
+            "probability. The local NLI scorer emits graded entailment probabilities, so the two "
+            "are not measuring on comparable scales, and a binary signal cannot serve as a "
+            "continuous reference standard for threshold calibration at all. The honest conclusion "
+            "is that this study has not established the local scorer as a substitute for the "
+            "judge, and that the judge as configured is unsuitable as the yardstick for that "
+            "comparison.",
         ],
     )
     para(

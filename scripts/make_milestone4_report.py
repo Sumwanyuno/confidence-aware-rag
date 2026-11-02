@@ -291,33 +291,35 @@ def section_generation(doc: Document, gen: dict) -> None:
          "is not wasted.")
 
     para(doc,
-         "Gate A transfers cleanly to HotpotQA: mean reranker relevancy is "
-         f"{cb['mean_rerank_relevancy']:.2f} for chunks, well above the calibrated 0.45 "
-         "threshold. The reranker scores each passage independently, so multi-hop structure "
-         "does not degrade its signal. Gate A is not the bottleneck.")
+         "Mean reranker relevancy is "
+         f"{cb['mean_rerank_relevancy']:.2f} for chunks, above the calibrated 0.45 threshold. "
+         "This average does not establish per-item Gate A accuracy or prove that the gate transfers "
+         "cleanly; it does show that low mean reranker scores are not the explanation for the "
+         "low guarded answer rate in this run.")
 
 
-def section_confidence_bottleneck(doc: Document, gen: dict) -> None:
+def section_confidence_bottleneck(doc: Document, gen: dict, retrieval: dict) -> None:
     doc.add_heading("4. The Confidence Bottleneck: Gate B and Multi-Hop NLI", level=1)
 
     sb = gen["sentence_baseline"]
     cb = gen["chunk_baseline"]
 
-    doc.add_heading("4.1 The false-contradiction rate", level=2)
+    doc.add_heading("4.1 The observed contradiction rate", level=2)
     para(doc,
          f"Gate B's contradiction rate on the baseline arm is {sb['gate_b_contradiction_rate']:.0%} "
          f"for sentence indexing and {cb['gate_b_contradiction_rate']:.0%} for chunk indexing. "
          "These are not hallucination rates — the baseline arm always answers, so the gate scores "
-         "are computed and logged but not enforced. What the numbers show is that DeBERTa's NLI "
-         "head flags 70–75% of all generated answers as contradicted, even though the baseline "
-         f"achieves a non-trivial F1 of {cb['f1']:.4f}.")
+         "are computed and logged but not enforced. DeBERTa flags 70–75% of generated answers as "
+         f"contradicted, while the chunk baseline achieves F1 {cb['f1']:.4f}. These scores do not "
+         "show whether each contradiction is correct: the answers were not manually labelled for "
+         "claim-level contradiction, and F1 is not a groundedness label.")
 
     para(doc,
-         "This is the central finding of Milestone 4: the false-contradiction rate is not a bug "
-         "in the pipeline. It is a correct application of single-premise NLI to a problem where "
-         "single-premise NLI is the wrong tool.")
+         "The central finding is that the current Gate B configuration often rejects answers on "
+         "this multi-hop sample. The experiment does not establish that all of those flags are "
+         "false contradictions or identify one cause for every rejection.")
 
-    doc.add_heading("4.2 Why single-premise NLI fails on multi-hop answers", level=2)
+    doc.add_heading("4.2 A possible single-premise NLI failure mode", level=2)
     para(doc,
          "Natural language inference, as DeBERTa was trained on it, takes one premise and one "
          "hypothesis and returns entailment, neutral, or contradiction. The premise is a single "
@@ -331,44 +333,49 @@ def section_confidence_bottleneck(doc: Document, gen: dict) -> None:
          "(2) Passage B states Person Y is of nationality Z. The correct answer 'Z' is not "
          "entailed by Passage A alone (which never mentions Z) and is not entailed by Passage B "
          "alone (which never mentions Film X). Each premise, evaluated independently, returns "
-         "neutral or contradiction — not because the answer is wrong, but because the reasoning "
-         "chain spans two premises and NLI has no mechanism for chaining them.")
+         "neutral or contradiction even when the combined reasoning is sound. This is a plausible "
+         "failure mode for the observed results, but this experiment did not label individual "
+         "cases to establish that it caused every Gate B rejection.")
 
     para(doc,
          "Gate B checks each claim against each retrieved passage independently, keeping the "
-         "best entailment score. For a single-hop factoid ('When was X born?'), one passage "
-         "usually contains the answer and entails the claim. For a multi-hop factoid, no single "
-         "passage entails the claim, so the best entailment score remains low and the "
-         "contradiction head fires. This is DeBERTa doing exactly what it was trained to do. "
-         "The model is correct; the task is mismatched.")
+         "best entailment score. If supporting facts are split across passages, no individual "
+         "premise may entail the complete claim. In that case, the score may remain low and the "
+         "contradiction head may fire. The available metrics are consistent with this explanation, "
+         "but do not prove it for each answer.")
 
     doc.add_heading("4.3 Architectural implication", level=2)
     para(doc,
-         "This is a fundamental architectural boundary, not a parameter to tune. Lowering the "
-         "Gate B threshold does not fix the problem — it would simply let all answers through, "
-         "destroying the gate's ability to catch actual hallucinations. The contradiction signal "
-         "is not noisy; it is structurally correct within its own frame and structurally wrong "
-         "for this task.")
+         "The results raise an architectural concern, but do not establish a universal boundary. "
+         "Changing the Gate B threshold would trade coverage against rejection and needs a held-out, "
+         "human-labelled evaluation. The current study does not show that threshold tuning cannot "
+         "improve the operating point, nor does it validate every contradiction label.")
 
     para(doc,
-         "Addressing this properly would require one of: (a) a multi-premise entailment model "
+         "Useful follow-up comparisons include: (a) a multi-premise entailment model "
          "that accepts a set of passages and reasons over their conjunction, (b) an explicit "
          "reasoning chain that reduces the multi-hop claim to single-hop sub-claims before NLI "
          "scoring, or (c) replacing the NLI gate entirely with an LLM-as-judge that can read "
-         "all passages at once. Each of these is a substantial architectural change, not a "
-         "threshold adjustment. This finding is documented as a definitive architectural "
-         "boundary for the current design.")
+         "all passages at once. These are candidate designs, not conclusions tested in this "
+         "milestone. The next evaluation should compare them on the same held-out answers with "
+         "human claim-level labels.")
 
     doc.add_heading("4.4 What this means for the project's claim", level=2)
     para(doc,
          "The project's thesis is that a RAG pipeline should estimate how reliable its own "
          "answer is and decline to answer when that estimate is low. On single-hop questions "
-         "(SQuAD 2.0), this works: the gates suppress 89% of hallucinations at a cost of "
-         "over-abstention that is dominated by fragmentary LLM outputs, not by the NLI model "
-         "misfiring. On multi-hop questions (HotpotQA), Gate A transfers cleanly but Gate B "
-         "cannot distinguish a genuinely ungrounded answer from one whose grounding is split "
-         "across passages. The confidence layer's value proposition holds for single-hop RAG; "
-         "extending it to multi-hop reasoning requires a different entailment architecture.")
+         "(SQuAD 2.0), the calibrated run substantially reduced hallucinations on unanswerable "
+         "questions, with high over-abstention on answerable questions. On HotpotQA, the guarded "
+         "answer rate was low and Gate B frequently flagged generated answers. Because the dataset "
+         "contains no cases where both supporting facts were co-located in a chunk, the run did "
+         "not test whether a unified premise resolves the issue. The results identify a limitation "
+         "to investigate, not a universal limit of multi-hop RAG.")
+
+    colocated = retrieval["granularities"]["chunk"]["by_colocation"]["colocated"]["n"]
+    para(doc,
+         f"The retrieval ablation found {colocated} HotpotQA items with both supporting facts "
+         "co-located in one chunk. This means the data cannot compare single-premise NLI on a "
+         "unified two-hop premise against NLI on split supporting passages.")
 
 
 def section_status(doc: Document) -> None:
@@ -376,7 +383,7 @@ def section_status(doc: Document) -> None:
 
     para(doc,
          "Milestone 4 is complete. The retrieval ablation, generation sweep, and Gate B "
-         "architectural diagnosis are finished and documented. The empirical data is in "
+        "evaluation are finished, and the qualified Gate B analysis is documented. The empirical data is in "
          "reports/retrieval_ablation_m4.json and reports/generation_hotpot_m4.json.")
 
     doc.add_heading("5.1 Summary of findings", level=2)
@@ -385,20 +392,20 @@ def section_status(doc: Document) -> None:
         "+35.3 points over strict sentence indexing.",
         "The LLM successfully synthesises answers from the wider chunk context, producing a "
         "44% F1 improvement in the baseline arm.",
-        "Gate A transfers cleanly to multi-hop: the reranker scores each passage independently "
-        "and is not affected by multi-hop structure.",
-        "Gate B's 70–75% false-contradiction rate on HotpotQA is a structural consequence of "
-        "single-premise NLI applied to multi-hop answers. This is an architectural boundary, "
-        "not a bug.",
+        "Mean chunk reranker relevancy remains above the fitted threshold, although the aggregate "
+        "does not establish per-item Gate A accuracy.",
+        "Gate B flagged 70–75% of baseline answers as contradicted, but these labels were not "
+        "human-validated. The experiment shows a sample-level limitation and motivates a "
+        "multi-premise comparison; it does not prove a universal architectural boundary.",
     ])
 
-    doc.add_heading("5.2 Remaining milestone", level=2)
+    doc.add_heading("5.2 Milestone 5 handoff", level=2)
     table(
         doc,
         ["Milestone", "Due", "Focus"],
         [
-            ["5", "24 Sep 2026",
-             "Results consolidation, reproducibility pass, final report and demo"],
+            ["5", "01 Nov 2026",
+             "Consolidated report prepared; tests, integration smoke checks, and app startup verified"],
         ],
         widths=[0.8, 1.2, 4.3],
     )
@@ -421,7 +428,7 @@ def main() -> int:
     section_objective(doc)
     section_retrieval(doc, retrieval)
     section_generation(doc, generation)
-    section_confidence_bottleneck(doc, generation)
+    section_confidence_bottleneck(doc, generation, retrieval)
     section_status(doc)
 
     OUT.parent.mkdir(parents=True, exist_ok=True)

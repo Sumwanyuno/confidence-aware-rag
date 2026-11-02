@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 import sys
 from pathlib import Path
 
@@ -105,16 +106,62 @@ def sweep_threshold(
 
 
 def roc_auc(scores: np.ndarray, labels: np.ndarray) -> float:
-    """Rank-based AUC (Mann-Whitney): P(score_positive > score_negative)."""
-    pos = scores[labels]
-    neg = scores[~labels]
-    if len(pos) == 0 or len(neg) == 0:
+    """Rank-based AUC (Mann-Whitney): P(score_positive > score_negative).
+
+    sklearn's implementation rather than a hand-rolled double loop: the naive
+    version is O(n*m) in pure Python, which is invisible at 150 items and
+    becomes the slowest part of calibration once a run reaches a few thousand.
+    Both compute the same statistic, ties included at half weight.
+    """
+    if labels.all() or not labels.any():
+        # AUC is undefined with only one class present, which happens on a
+        # held-out half that landed all-answerable.
         return float("nan")
-    wins = 0.0
-    for p in pos:
-        for n in neg:
-            wins += 1.0 if p > n else 0.5 if p == n else 0.0
-    return wins / (len(pos) * len(neg))
+    from sklearn.metrics import roc_auc_score
+
+    return float(roc_auc_score(labels, scores))
+
+
+def split_items(item_ids: list[str], *, test_frac: float = 0.5, seed: int = 20260916) -> set[str]:
+    """Deterministic item-level train/test split; returns the held-out ids.
+
+    Split on ``item_id`` rather than on telemetry rows, because each item
+    contributes two rows (one per arm) and letting an item's guarded row train
+    a threshold that its baseline row then scores would leak across the
+    boundary. Seeded so a re-run reproduces the same halves: the point of a
+    held-out set is lost if it moves every time the script is invoked.
+    """
+    uniq = sorted(set(item_ids))
+    shuffled = list(uniq)
+    random.Random(seed).shuffle(shuffled)
+    return set(shuffled[: int(round(len(shuffled) * test_frac))])
+
+
+def evaluate_at(scores: np.ndarray, labels: np.ndarray, threshold: float, *, kind: str) -> dict:
+    """Score one fixed threshold on a set it was not fitted on."""
+    if len(scores) == 0:
+        return {"n": 0}
+    pred = scores >= threshold
+    tp = int(np.sum(pred & labels))
+    fp = int(np.sum(pred & ~labels))
+    fn = int(np.sum(~pred & labels))
+    tn = int(np.sum(~pred & ~labels))
+    precision = tp / (tp + fp) if tp + fp else 0.0
+    recall = tp / (tp + fn) if tp + fn else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+    out = {
+        "n": int(len(scores)),
+        "threshold": float(threshold),
+        "tp": tp, "fp": fp, "fn": fn, "tn": tn,
+        "precision": round(precision, 4),
+        "recall": round(recall, 4),
+        "f1": round(f1, 4),
+        "roc_auc": round(roc_auc(scores, labels), 4) if not np.isnan(roc_auc(scores, labels)) else None,
+    }
+    if kind == "gate_a":
+        fpr = fp / (fp + tn) if fp + tn else 0.0
+        out["youden_j"] = round(recall - fpr, 4)
+    return out
 
 
 def calibrate_gate_a(joined: pd.DataFrame) -> dict:

@@ -2,8 +2,10 @@
   "run_tag": "squad2-judge",
   "n": 34,
   "thresholds_used": {
-    "gate_a": 0.45,
-    "gate_b": 0.25
+    "nli_gate_a": 0.45,
+    "nli_gate_b": 0.25,
+    "llm_gate_a": 0.5,
+    "llm_gate_b": 0.5
   },
   "gate_a_relevancy": {
     "n": 33,
@@ -11,6 +13,13 @@
     "spearman": 0.132,
     "mean_nli": 0.4232,
     "mean_llm": 0.0673,
+    "llm_range": [
+      0.0,
+      0.4483
+    ],
+    "llm_distinct_values": 19,
+    "nli_threshold": 0.45,
+    "llm_threshold": 0.5,
     "decision_agreement": {
       "n": 33,
       "observed_agreement": 0.303,
@@ -19,6 +28,16 @@
       "only_x": 23,
       "only_y": 0,
       "both_fail": 10
+    },
+    "llm_threshold_rate_matched": 0.0345,
+    "decision_agreement_rate_matched": {
+      "n": 33,
+      "observed_agreement": 0.6061,
+      "cohens_kappa": 0.0403,
+      "both_pass": 17,
+      "only_x": 6,
+      "only_y": 7,
+      "both_fail": 3
     }
   },
   "gate_b_faithfulness": {
@@ -27,7 +46,24 @@
     "spearman": -0.2985,
     "mean_nli": 0.3956,
     "mean_llm": 0.8824,
+    "llm_range": [
+      0.0,
+      1.0
+    ],
+    "llm_distinct_values": 2,
+    "nli_threshold": 0.25,
+    "llm_threshold": 0.5,
     "decision_agreement": {
+      "n": 17,
+      "observed_agreement": 0.4118,
+      "cohens_kappa": -0.0366,
+      "both_pass": 6,
+      "only_x": 1,
+      "only_y": 9,
+      "both_fail": 1
+    },
+    "llm_threshold_rate_matched": 1.0,
+    "decision_agreement_rate_matched": {
       "n": 17,
       "observed_agreement": 0.4118,
       "cohens_kappa": -0.0366,
